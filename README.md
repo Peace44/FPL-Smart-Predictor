@@ -21,6 +21,8 @@ FPL_TEAM_ID=1234567          # the number in your FPL "Points" page URL
 ODDS_API_KEY=...             # the-odds-api.com key (free tier: 500 credits a month; a run uses 2)
 ```
 
+To have it make the moves itself, see *Letting it act for you*.
+
 Without an odds key the tool still works, using its own team ratings for every fixture.
 
 ## Commands
@@ -33,7 +35,10 @@ Without an odds key the tool still works, using its own team ratings for every f
 | `fpl player Haaland` | One player's projection per fixture, split into goals, assists, clean sheets, bonus... |
 | `fpl review` | How past recommendations scored, next to your real score and the game average |
 | `fpl backtest --season 2025-26` | Replay the optimiser over a finished season |
-| `fpl auto` | Run `plan` only if the deadline is within two days (for cron) |
+| `fpl auto` | Unattended mode: plan when a deadline is near and, if allowed, update your team (for a scheduler) |
+| `fpl apply` | Plan now and carry the plan out on your FPL account (`--dry-run` shows the requests without sending them) |
+| `fpl login` | Check the FPL sign-in and show what FPL says about your team (reads only) |
+| `fpl status` | What unattended mode did last, and the recent actions on your account |
 
 Useful `fpl plan` options:
 
@@ -46,7 +51,7 @@ Useful `fpl plan` options:
 
 ## How it works
 
-1. **Data** (`fpl_api.py`, `history.py`, `market.py`, `odds.py`). The official FPL API for
+1. **Data** (`fpl_api.py`, `history.py`, `market.py`, `odds.py`, `account.py`). The official FPL API for
    the current season, your team and fixtures; the vaastav archive for four past seasons;
    football-data.co.uk for historical bookmaker odds; the-odds-api.com for upcoming odds.
    Everything is cached under `data/raw/`.
@@ -108,21 +113,156 @@ Known limits:
   a premium captain can be slightly undervalued.
 - Bookmaker odds usually cover only the next one or two gameweeks.
 - The engine knows FPL's injury flags but not press-conference news or predicted line-ups.
-- Free transfers are inferred, not read (see `--ft`).
+- Free transfers are inferred, not read (see `--ft`), unless a sign-in is set up.
+- It does not learn from its own results. Every run refits the team ratings, player rates and
+  calibration on all matches played so far, and the minutes model is retrained after each
+  gameweek, so the projections keep up with the season. The settings behind them (decay rates,
+  horizon weights, chip reserves) are fixed; they were chosen by replaying past seasons with the
+  scripts under *Development*, and `fpl review` only reports how past plans scored.
 - It maximises expected points. It does not yet weigh ownership (differentials against
   template picks) when you are chasing or protecting rank.
 
+## Letting it act for you
+
+By default the tool only writes reports. With a sign-in and `FPL_AUTOPILOT=on` it also makes the
+transfers, plays the chips and sets the line-up, bench order and captain.
+
+**1. Give it a sign-in (once).** FPL has no API keys; the tool uses the same refresh token your
+browser holds after you log in.
+
+1. Open a **private / incognito** window and log in at fantasy.premierleague.com.
+2. Press F12, open the *Application* tab (Firefox: *Storage*), then *Local Storage* →
+   `https://fantasy.premierleague.com`.
+3. Find the key that starts with `oidc.user:` and copy its whole value (it starts with `{` and
+   contains `"refresh_token"`).
+4. Run `.venv/bin/fpl login --paste`, paste, then press Enter and Ctrl-D. It prints your bank,
+   free transfers and chips if the sign-in works. (Or put just the `refresh_token` text in `.env`
+   on one line as `FPL_REFRESH_TOKEN=...` and run `.venv/bin/fpl login`.)
+5. Close the private window **without logging out**. The token is replaced every time it is
+   used, so a browser session that keeps using the same one would cut the tool off (and logging
+   out cancels it).
+
+The live token is kept in `data/auth/token.json`, readable only by you and never committed.
+It is valid for 180 days and every use renews it; unattended mode uses it about once a day, so
+it should not lapse while the schedule keeps running. If it ever does, the tool says so (see
+*Staying informed*) and you repeat the steps above.
+
+**2. Switch it on.** In `.env`:
+
+```
+FPL_AUTOPILOT=on             # without this it signs in to read your exact squad, but changes nothing
+FPL_APPLY_WITHIN_HOURS=30    # how long before the deadline it first acts (default 30)
+FPL_AUTO_MAX_HITS=1          # most -4 hits it may take in one gameweek (default 1; 0 = never)
+FPL_CHECK_EVERY_HOURS=2      # how often your scheduler runs the check (default 2; see Automation)
+FPL_BAN=Player One,Player Two (AVL)     # never buy these
+FPL_LOCK=Player Three                   # never sell these
+```
+
+**When it acts** (`autopilot.py`). Two days before a deadline it writes a plan. The first run
+inside the last 30 hours carries the plan out, because nobody knows whether the computer will be
+on later; it waits if the previous gameweek still has matches to play, unless the deadline is
+under six hours away. After that the squad is settled: later runs skip the chip search, re-check
+the line-up and captain, and happen when one of your players' injury flags changes, every twelve
+hours, and once more in the last five hours.
+
+**What stops it doing damage** (`execute.py`):
+
+- It works from what your account looks like at that moment, not from what the plan assumed,
+  and refuses if the plan is not legal under the game's rules, if prices have moved it out of
+  budget, or if the transfers would cost more points than the plan expected.
+- Unattended, it takes at most one -4 hit a gameweek (`FPL_AUTO_MAX_HITS`). The replays do not
+  show hits paying for themselves, so this is a cap on risk, not a tuned value.
+- A wildcard or free hit is played with a single transfer first, one that a free transfer covers
+  anyway. Only when FPL then shows unlimited transfers are the rest sent. If the chip did not
+  register, it stops having spent nothing.
+- After every change it reads your team back and compares it with what it asked for. Anything
+  unexpected stops the run and is reported; it never tries to repair a surprise by itself.
+- It never starts within ten minutes of a deadline.
+
+`fpl apply --dry-run` prints exactly what would be sent, without sending it.
+
+**What you should know before relying on it:**
+
+- FPL's sign-in and "my team" endpoints are undocumented and were written from how other
+  community tools use them. Signing in, reading the team and saving a line-up have been checked
+  against a real account (November 2026). Making a transfer and playing a chip have not: the
+  first real one is the test, and the checks above are built so that a wrong guess ends in
+  "nothing happened" plus a warning.
+- A transfer cannot be undone, and a wildcard or free hit cannot be cancelled once played.
+- Whether FPL's game terms allow automated play has not been checked: the Premier League's
+  website terms do not mention it, and the game's own terms page could not be read by a script.
+  Read them yourself if an account sanction would matter to you.
+- If you change your team by hand, the next run plans from the new squad but may change your
+  line-up and captain back. Set `FPL_AUTOPILOT=off` for a week you want to manage yourself.
+
 ## Automation
 
-`scripts/auto.sh` runs `fpl auto`, which does nothing unless the next deadline is within two
-days, and logs to `reports/auto.log`. A crontab line that checks twice a day (08:00 and 20:00
-local time; a run near the deadline keeps ten solver processes busy for about nine minutes):
+`scripts/auto.sh` runs `fpl auto` and logs to `reports/auto.log`. Trigger it as often as you
+like: far from a deadline it exits in a few seconds (and, once a day, uses the sign-in so it does
+not lapse); a second copy started while one is running exits at once. Near a deadline a full
+run keeps ten solver processes busy for about nine minutes.
+
+**Windows (the computer does not need WSL open).** In a Windows PowerShell window, once:
+
+```powershell
+Register-ScheduledTask -TaskName "FPL Smart Predictor" `
+  -Action (New-ScheduledTaskAction -Execute "wsl.exe" -Argument "-d Ubuntu -- /home/peace/PROJECTS/Personal/FPL-Smart-Predictor/scripts/auto.sh") `
+  -Trigger (New-ScheduledTaskTrigger -Once -At 00:10 -RepetitionInterval (New-TimeSpan -Hours 2)) `
+  -Settings (New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew)
+```
+
+It checks every two hours while you are logged in to Windows, and catches up on a missed check
+when you next log in. A console window is visible while it runs. Remove it with
+`Unregister-ScheduledTask -TaskName "FPL Smart Predictor"`. The computer still has to be on and
+logged in at some point in the 30 hours before each deadline; if it is not, nothing happens that
+week.
+
+**Every 11 hours instead.** If a console window every two hours is too much:
+
+```powershell
+Set-ScheduledTask -TaskName "FPL Smart Predictor" -Trigger (New-ScheduledTaskTrigger -Once -At 20:00 -RepetitionInterval (New-TimeSpan -Hours 11))
+```
+
+and in `.env` set `FPL_CHECK_EVERY_HOURS=11` and `FPL_APPLY_WITHIN_HOURS=24`. An interval under
+half the acting window always puts at least two checks inside it: the first carries the plan
+out, and the last one that still leaves an hour before the deadline re-checks the line-up and
+captain. Because 11 does not divide 24, the checks fall two hours earlier each day. One that
+falls while the computer is off or asleep runs when you next log in, so both looks happen only
+if the computer is on twice in those 24 hours; used once, it acts once.
+
+**Once a day.** The fewest checks that still work: `-Trigger (New-ScheduledTaskTrigger -Daily
+-At 20:00)` with `FPL_CHECK_EVERY_HOURS=24` and `FPL_APPLY_WITHIN_HOURS=24`. Exactly one check
+falls inside the acting window (20:00 the evening before, at least 16 hours ahead of any
+deadline), so it acts once and never looks again: an injury announced after that run is not
+acted on.
+
+Either way `scripts/auto.sh` retries a failed run twice, ten minutes apart, because the next
+trigger may come too late.
+
+**cron (only while WSL is running):**
 
 ```
-0 8,20 * * * /home/peace/PROJECTS/Personal/FPL-Smart-Predictor/scripts/auto.sh
+10 */2 * * * /home/peace/PROJECTS/Personal/FPL-Smart-Predictor/scripts/auto.sh
 ```
 
-On WSL, cron only runs while the WSL instance is up.
+### Staying informed
+
+After every run that planned or changed something:
+
+- `reports/status.md` says what it did and whether anything needs you; `reports/actions.log`
+  lists every change made to your account; `reports/gwNN/applied-*.json` has the exact requests.
+- On WSL the status and the latest plan are also copied to `Documents\FPL` on the Windows side
+  (`FPL_WINDOWS_DIR` changes the folder, `off` disables it), and a Windows notification appears
+  when your team was changed or something needs your attention, such as an expired sign-in.
+- With `DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...` in `.env` (Discord: channel
+  settings → Integrations → Webhooks), a report goes to that channel for:
+  - every run that planned or acted: what it did, the plan, the line-up, anything that needs you;
+  - a run that failed, and a sign-in that has expired;
+  - a check with nothing to do yet, at most every six hours, so you can see the schedule is alive;
+  - each finished gameweek: points, the game average, overall rank and how far it moved.
+
+  `reports/auto.log` records whether each report was delivered. Anyone who has the webhook
+  address can post to the channel, so keep it out of anything you share.
 
 ## Development
 

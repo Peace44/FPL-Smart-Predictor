@@ -1,7 +1,8 @@
 """Current state of an FPL entry: squad, selling prices, bank, free transfers, chips.
 
-Everything is derived from the public API (no login), so free transfers are reconstructed
-from the transfer history rather than read directly.
+From the public API alone (no login) free transfers have to be reconstructed from the transfer
+history. When the signed-in "my team" data is passed in (account.py), the squad, selling prices,
+bank, free transfers and any chip already played for the deadline are read from it instead.
 """
 from __future__ import annotations
 
@@ -28,6 +29,7 @@ class TeamState:
     notes: list[str] = field(default_factory=list)
     total_points: int = 0
     overall_rank: int | None = None
+    active_chip: str | None = None        # chip already played for the upcoming deadline (signed-in data only)
 
     @property
     def squad_sell_value(self) -> int:
@@ -57,7 +59,9 @@ def free_transfers_from_history(history: dict, started_gw: int, next_gw: int) ->
     return ft
 
 
-def load(team_id: int, bs: dict | None = None, free_transfers: int | None = None) -> TeamState:
+def load(team_id: int, bs: dict | None = None, free_transfers: int | None = None,
+         private: dict | None = None) -> TeamState:
+    """`private`: the signed-in "my team" response, when there is one."""
     bs = bs or fpl_api.bootstrap()
     els = {e["id"]: e for e in bs["elements"]}
     cur, nxt = fpl_api.current_and_next_gw(bs)
@@ -83,8 +87,11 @@ def load(team_id: int, bs: dict | None = None, free_transfers: int | None = None
     vice = next((p["element"] for p in picks["picks"] if p["is_vice_captain"]), None)
     bank = picks["entry_history"]["bank"]
 
-    # transfers already confirmed for the upcoming gameweek
-    pending = [t for t in transfers if t["event"] == nxt]
+    active = next((c.get("name") for c in (private or {}).get("chips") or []
+                   if c.get("status_for_entry") == "active" or c.get("is_pending") is True), None)
+    # transfers already confirmed for the upcoming gameweek (under an active free hit they build
+    # the one-week squad, not this one)
+    pending = [] if active == "freehit" else [t for t in transfers if t["event"] == nxt]
     for t in sorted(pending, key=lambda t: t["time"]):
         if t["element_out"] in squad:
             squad[squad.index(t["element_out"])] = t["element_in"]
@@ -106,14 +113,33 @@ def load(team_id: int, bs: dict | None = None, free_transfers: int | None = None
                 buy[p] = at[0] if at else e["now_cost"] - e["cost_change_start"]
     sell = {p: selling_price(buy[p], els[p]["now_cost"]) for p in squad}
 
-    if free_transfers is None:
+    ft_read = None
+    if private and active != "freehit":
+        # the account itself: exact squad, selling prices and bank
+        mine = sorted(private["picks"], key=lambda p: p["position"])
+        squad = [p["element"] for p in mine]
+        lineup = [p["element"] for p in mine if p["position"] <= 11]
+        captain = next((p["element"] for p in mine if p.get("is_captain")), captain)
+        vice = next((p["element"] for p in mine if p.get("is_vice_captain")), vice)
+        buy = {p["element"]: p.get("purchase_price", buy.get(p["element"], els[p["element"]]["now_cost"])) for p in mine}
+        sell = {p["element"]: p.get("selling_price", sell.get(p["element"], els[p["element"]]["now_cost"])) for p in mine}
+        tr = private.get("transfers") or {}
+        bank = tr.get("bank", bank)
+        if active != "wildcard" and tr.get("status") != "unlimited" and tr.get("limit") is not None:
+            ft_read = max(0, int(tr["limit"]) - int(tr.get("made") or 0))
+    if active:
+        notes.append(f"The {active} chip is already active for GW{nxt}.")
+
+    if free_transfers is not None:
+        ft = free_transfers
+    elif ft_read is not None:
+        ft = ft_read
+    else:
         ft = free_transfers_from_history(hist, started, nxt)
-        if used_chip.get(nxt) not in ("wildcard", "freehit"):
+        if used_chip.get(nxt) not in ("wildcard", "freehit") and not active:
             ft = max(ft - len(pending), 0)
         notes.append(f"Free transfers ({ft}) are reconstructed from your transfer history; "
                      "check the number on the FPL site and override with --ft if it differs.")
-    else:
-        ft = free_transfers
 
     # Each chip comes twice a season (one per half); each copy has its own window and expires.
     chips: list[dict] = []
@@ -126,4 +152,4 @@ def load(team_id: int, bs: dict | None = None, free_transfers: int | None = None
 
     return TeamState(team_id, nxt, squad, {p: buy[p] for p in squad}, sell, bank, ft, chips,
                      captain, vice, lineup, notes, ent.get("summary_overall_points") or 0,
-                     ent.get("summary_overall_rank"))
+                     ent.get("summary_overall_rank"), active)

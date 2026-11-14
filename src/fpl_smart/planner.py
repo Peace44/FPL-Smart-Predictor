@@ -79,10 +79,16 @@ def resolve_players(names, players: pd.DataFrame) -> list[int]:
 def make(horizon: int | None = None, ft: int | None = None, use_chips: bool = True,
          wildcard: int | None = None, freehit: int | None = None, quick: bool = False, sims: int = 20,
          refresh: bool = True, banned=(), locked=(), max_hits: int = 2, workers: int | None = None,
-         entry_id: int | None = None, log=print) -> Recommendation:
+         entry_id: int | None = None, private: dict | None = None, log=print) -> Recommendation:
+    """`private`: the signed-in "my team" data (account.py), for an exact squad, bank and free transfers."""
     entry_id = entry_id or team_id()
     bs = fpl_api.bootstrap(0.0 if refresh else 6.0)
-    state = my_team.load(entry_id, bs, free_transfers=ft)
+    state = my_team.load(entry_id, bs, free_transfers=ft, private=private)
+    # a wildcard or free hit already played for this deadline cannot be taken back: plan with it
+    if state.active_chip == "wildcard":
+        wildcard, freehit = state.next_gw, (None if freehit == state.next_gw else freehit)
+    elif state.active_chip == "freehit":
+        freehit, wildcard = state.next_gw, (None if wildcard == state.next_gw else wildcard)
     H = horizon or auto_horizon(state)
     log(f"projecting GW{state.next_gw}-{min(38, state.next_gw + H - 1)} ...")
     P = xp_mod.project_live(horizon=H, refresh=refresh)

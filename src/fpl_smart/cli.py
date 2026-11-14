@@ -6,7 +6,10 @@
     fpl player      one player's projection, broken into components
     fpl backtest    replay the optimiser over a past season
     fpl review      how past recommendations scored, next to your actual points
-    fpl auto        run `plan` only when a deadline is near (for cron)
+    fpl auto        unattended mode: plan near a deadline and, if allowed, act on the account
+    fpl apply       plan now and carry it out on the account (--dry-run shows the requests only)
+    fpl login       check the FPL sign-in and show what FPL says about the team
+    fpl status      what unattended mode did last
 """
 from __future__ import annotations
 
@@ -178,21 +181,33 @@ def cmd_review(a) -> int:
 
 
 def cmd_auto(a) -> int:
-    from . import fpl_api
-    bs = fpl_api.bootstrap(0.0)
-    ev = next((e for e in bs["events"] if e["is_next"]), None)
-    if ev is None:
-        _log("season is over; nothing to do")
-        return 0
-    left = (pd.Timestamp(ev["deadline_time"]) - pd.Timestamp.now(tz="UTC")).total_seconds() / 86400.0
-    if left > a.within_days and not a.force:
-        _log(f"GW{ev['id']} deadline is {left:.1f} days away (running within {a.within_days}); nothing to do")
-        return 0
-    _log(f"GW{ev['id']} deadline in {left:.1f} days: planning")
-    a.horizon = a.ft = a.wildcard = a.freehit = a.workers = None
-    a.no_chips = a.quick = a.no_refresh = a.no_save = False
-    a.sims, a.ban, a.lock, a.max_hits = 20, [], [], 2
-    return cmd_plan(a)
+    from . import autopilot
+    return autopilot.run(force=a.force, dry_run=a.dry_run, quick=a.quick, log=_log)
+
+
+def cmd_apply(a) -> int:
+    from . import autopilot
+    return autopilot.run(apply_now=True, dry_run=a.dry_run, quick=a.quick, log=_log)
+
+
+def cmd_login(a) -> int:
+    from . import autopilot
+    pasted = None
+    if a.paste:
+        print("Paste the value copied from the browser, then press Enter and Ctrl-D:", file=sys.stderr)
+        pasted = sys.stdin.read()
+    return autopilot.login_summary(pasted, log=_log)
+
+
+def cmd_status(a) -> int:
+    from .config import REPORTS
+    f = REPORTS / "status.md"
+    print(f.read_text() if f.exists() else "Unattended mode has not run yet.")
+    log = REPORTS / "actions.log"
+    if log.exists():
+        print("Recent actions on the account:")
+        print("".join(log.read_text().splitlines(keepends=True)[-a.n:]))
+    return 0
 
 
 # ----------------------------------------------------------------------------- parser
@@ -246,10 +261,25 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("review", help="how past recommendations scored, next to your actual points")
     p.set_defaults(fn=cmd_review)
 
-    p = sub.add_parser("auto", help="run `plan` only when the deadline is near (for cron)")
-    p.add_argument("--within-days", type=float, default=2.0)
-    p.add_argument("--force", action="store_true")
+    p = sub.add_parser("auto", help="unattended mode: plan near a deadline and, if allowed, act on the account")
+    p.add_argument("--force", action="store_true", help="run now whatever the timing says")
+    p.add_argument("--dry-run", action="store_true", help="show what would be sent to FPL without sending it")
+    p.add_argument("--quick", action="store_true", help="skip the chip-timing search")
     p.set_defaults(fn=cmd_auto)
+
+    p = sub.add_parser("apply", help="plan now and carry the plan out on your FPL account")
+    p.add_argument("--dry-run", action="store_true", help="show what would be sent to FPL without sending it")
+    p.add_argument("--quick", action="store_true", help="skip the chip-timing search")
+    p.set_defaults(fn=cmd_apply)
+
+    p = sub.add_parser("login", help="check the FPL sign-in (reads only)")
+    p.add_argument("--paste", action="store_true",
+                   help="sign in with a token pasted on standard input (the browser's whole oidc.user value is fine)")
+    p.set_defaults(fn=cmd_login)
+
+    p = sub.add_parser("status", help="what unattended mode did last")
+    p.add_argument("-n", type=int, default=15, help="lines of the action log to show")
+    p.set_defaults(fn=cmd_status)
     return ap
 
 
