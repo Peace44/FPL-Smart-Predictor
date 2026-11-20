@@ -244,19 +244,16 @@ def _apply(w: GWPlan, account, bs: dict, out: Outcome, max_new_hits: int | None,
                     out.warnings.append(f"FPL shows unlimited transfers but does not label the {CHIP_NAMES[squad_chip]} "
                                         "as active; check the chip on the FPL site")
             if rest:
-                def rest_call():
-                    try:
-                        return account.post_transfers(w.gw, rest, None)
-                    except acc.ApiError as e:       # transfers are already unlimited, so naming the chip again is safe
-                        if e.status and 400 <= e.status < 500:
-                            return account.post_transfers(w.gw, rest, squad_chip)
-                        raise
-                send("transfers", {"event": w.gw, "chip": None, "transfers": rest}, rest_call)
+                # The chip must be named again: a transfers request with no chip cancels a chip that is
+                # still pending for the deadline, and every transfer in it is then charged (GW11: -40).
+                send("transfers", {"event": w.gw, "chip": squad_chip, "transfers": rest},
+                     lambda: account.post_transfers(w.gw, rest, squad_chip))
                 out.actions.append(f"Made the other {len(rest)} transfer(s) under the {CHIP_NAMES[squad_chip]}: "
                                    + "; ".join(f"{name(t['element_out'])} → {name(t['element_in'])}" for t in rest))
         else:
-            send("transfers", {"event": w.gw, "chip": None, "transfers": pairs},
-                 lambda: account.post_transfers(w.gw, pairs, None))
+            keep = active if active in ("wildcard", "freehit") else None   # never send "no chip" over a pending one
+            send("transfers", {"event": w.gw, "chip": keep, "transfers": pairs},
+                 lambda: account.post_transfers(w.gw, pairs, keep))
             how = "free under the active chip" if unlimited else (f"-{4 * new_hits} points" if new_hits else "free")
             out.actions.append(f"Made {len(pairs)} transfer(s) ({how}): {moves}")
 
@@ -268,9 +265,13 @@ def _apply(w: GWPlan, account, bs: dict, out: Outcome, max_new_hits: int | None,
                                f"unexpected: {sorted(name(p) for p in have - set(w.squad))}, "
                                f"missing: {sorted(name(p) for p in set(w.squad) - have)}")
             out.points_cost = acc.points_spent(mt)
-            if out.points_cost > spent_before + 4 * new_hits:
+            chip_lost = (squad_chip or active in ("wildcard", "freehit")) and not acc.unlimited_transfers(mt)
+            if chip_lost or out.points_cost > spent_before + 4 * new_hits:
+                lost = CHIP_NAMES[squad_chip or active]
                 raise Mismatch(f"FPL shows {out.points_cost} points spent on transfers; "
-                               f"{spent_before + 4 * new_hits} was expected")
+                               f"{spent_before + 4 * new_hits} was expected"
+                               + (f". The {lost} is no longer active: play it on the FPL site before the "
+                                  "deadline and the points for this week's transfers are given back" if chip_lost else ""))
     elif bought:
         raise Refused("the squad on FPL has fewer players than the plan expects")
 
@@ -293,6 +294,10 @@ def _apply(w: GWPlan, account, bs: dict, out: Outcome, max_new_hits: int | None,
             if _lineup_state(mt) != want:
                 raise Mismatch("after saving, the line-up, bench order or captain on FPL is not the planned one")
             now_active = acc.active_chip(mt)
+            held = squad_chip or (active if active in ("wildcard", "freehit") else None)
+            if held and not acc.unlimited_transfers(mt):
+                raise Mismatch(f"after saving the line-up FPL no longer shows the {CHIP_NAMES[held]} as active; "
+                               "play it again on the FPL site before the deadline")
             if team_chip and now_active != team_chip:
                 raise Mismatch(f"the line-up was saved but FPL does not show the {CHIP_NAMES[team_chip]} as active")
             if not team_chip and now_active in ("bboost", "3xc"):

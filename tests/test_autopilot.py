@@ -46,6 +46,10 @@ class FakeFPL:
         self.posts.append(("transfers", chip, len(transfers)))
         if chip and not self.ignore_chip:
             self.chips[chip] = "active"
+        elif not chip:                    # as FPL did in GW11: no chip named cancels one still pending
+            for c in ("wildcard", "freehit"):
+                if self.chips.get(c) == "active":
+                    self.chips[c] = "available"
         for t in transfers:
             slot = next(p for p in self.picks if p["element"] == t["element_out"])
             assert self.pos[t["element_in"]] == self.pos[t["element_out"]]
@@ -177,7 +181,7 @@ def test_wildcard_is_played_with_one_transfer_first(world):
     fpl, rec = FakeFPL(players, squad), target(players, squad, swaps=5, chip="wildcard")
     out = run(rec, fpl, bs)
     assert out.ok and out.verified and fpl.cost == 0 and fpl.chips["wildcard"] == "active"
-    assert fpl.posts == [("transfers", "wildcard", 1), ("transfers", None, 4), ("picks", None, 15)]
+    assert fpl.posts == [("transfers", "wildcard", 1), ("transfers", "wildcard", 4), ("picks", None, 15)]
     assert {p["element"] for p in fpl.picks} == set(rec.plan.weeks[0].squad)
 
 
@@ -188,6 +192,22 @@ def test_wildcard_that_does_not_register_costs_nothing(world):
     out = run(rec, fpl, bs)
     assert "Mismatch" in out.error and "no points spent" in out.error
     assert fpl.posts == [("transfers", "wildcard", 1)] and fpl.made == 1 and fpl.cost == 0
+
+
+def test_wildcard_dropped_by_fpl_is_reported_with_the_fix(world):
+    """GW11: FPL let go of the pending wildcard and charged the rest. Say so, and say how to undo it."""
+    players, squad, bs = world
+    fpl, rec = FakeFPL(players, squad), target(players, squad, swaps=5, chip="wildcard")
+    real = fpl.post_transfers
+
+    def drops_chip(gw, transfers, chip=None):
+        res = real(gw, transfers, chip)
+        if fpl.made > 1:
+            fpl.chips["wildcard"] = "available"
+        return res
+    fpl.post_transfers = drops_chip
+    out = run(rec, fpl, bs)
+    assert "Mismatch" in out.error and "no longer active" in out.error and "FPL site" in out.error
 
 
 def test_wildcard_needs_a_free_transfer_to_test_with(world):
@@ -202,7 +222,7 @@ def test_more_transfers_are_free_once_the_wildcard_is_active(world):
     run(target(players, squad, swaps=3, chip="wildcard"), fpl, bs)
     fpl.posts.clear()
     out = run(target(players, squad, swaps=5, chip="wildcard"), fpl, bs)
-    assert out.ok and fpl.cost == 0 and fpl.posts[0][:2] == ("transfers", None)
+    assert out.ok and fpl.cost == 0 and fpl.posts[0][:2] == ("transfers", "wildcard")   # keeps the chip named
     # ... but a plan that ignores the active chip is refused
     assert "already active" in run(target(players, squad, swaps=1), fpl, bs).error
 
