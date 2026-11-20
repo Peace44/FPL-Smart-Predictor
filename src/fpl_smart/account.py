@@ -231,7 +231,13 @@ def active_chip(my_team: dict) -> str | None:
 def points_spent(my_team: dict) -> int:
     """Points already deducted for transfers made for the upcoming deadline. In FPL's data `cost`
     is the price of one extra transfer (4), `limit` the free transfers the gameweek started with
-    and `made` the transfers made so far."""
+    and `made` the transfers made so far.
+
+    Nothing is charged while a Wildcard or Free Hit is active (playing one gives back hits already
+    taken that week), whatever those fields say: with the Wildcard active in GW11 FPL still showed
+    `status: "cost"` and a limit, so a count of the free transfers in `made` would read as a charge."""
+    if active_chip(my_team) in ("wildcard", "freehit"):
+        return 0
     tr = my_team.get("transfers") or {}
     if tr.get("status") != "cost" or tr.get("limit") is None:
         return 0

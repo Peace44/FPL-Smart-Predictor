@@ -30,12 +30,14 @@ class FakeFPL:
         self.posts: list[tuple] = []
         self.ignore_chip = False          # FPL takes the transfers but does not register the chip
         self.forget_captain = False       # FPL saves the line-up but not the armband
+        self.chip_shows_cost = False      # as FPL did in GW11: an active chip leaves status "cost" and the limit
 
     def my_team(self):
         active = any(self.chips.get(c) == "active" for c in ("wildcard", "freehit"))
+        unlimited = active and not self.chip_shows_cost
         return {"picks": [dict(p) for p in self.picks],
-                "transfers": {"bank": self.bank, "limit": None if active else self.limit, "made": self.made,
-                              "cost": 4, "status": "unlimited" if active else "cost", "value": 1000},
+                "transfers": {"bank": self.bank, "limit": None if unlimited else self.limit, "made": self.made,
+                              "cost": 4, "status": "unlimited" if unlimited else "cost", "value": 1000},
                 "chips": [{"name": c, "status_for_entry": s, "is_pending": False} for c, s in self.chips.items()]}
 
     @property
@@ -224,6 +226,20 @@ def test_points_already_lost_are_reported_by_every_later_run(world):
     assert autopilot.overspent(4, 11, autopilot.Settings(enabled=True, max_hits=0))
 
 
+def test_transfers_under_an_active_wildcard_are_not_read_as_a_charge(world):
+    """With the Wildcard active in GW11, FPL still showed status "cost" and a limit of 2. If its "made"
+    also counts the transfers made under the chip, that is no charge, and must not stop the run
+    between the transfers and the line-up."""
+    players, squad, bs = world
+    fpl, rec = FakeFPL(players, squad), target(players, squad, swaps=5, chip="wildcard")
+    fpl.chip_shows_cost = True
+    out = run(rec, fpl, bs)
+    assert out.ok and out.verified and out.points_cost == 0 and fpl.made == 5 > fpl.limit
+    assert fpl.posts == [("transfers", "wildcard", 1), ("transfers", "wildcard", 4), ("picks", None, 15)]
+    fpl.chips["wildcard"] = "available"               # had FPL dropped the chip, the same fields are a charge
+    assert fpl.cost == 16
+
+
 def test_wildcard_needs_a_free_transfer_to_test_with(world):
     players, squad, bs = world
     fpl, rec = FakeFPL(players, squad, free=0), target(players, squad, swaps=5, chip="wildcard")
@@ -359,6 +375,11 @@ def test_fpl_reports_the_price_of_a_hit_not_the_points_spent():
     assert acc.points_spent(mt) == 0 and acc.unlimited_transfers(mt)
     mt["chips"][0]["is_pending"] = True
     assert acc.active_chip(mt) == "wildcard"
+    mt["transfers"].update(status="cost", limit=2, made=12)                  # GW11 with the Wildcard active
+    mt["chips"][0].update(status_for_entry="active", is_pending=False)
+    assert acc.points_spent(mt) == 0 and acc.unlimited_transfers(mt)
+    mt["chips"][0]["status_for_entry"] = "available"                          # ... and once FPL had dropped it
+    assert acc.points_spent(mt) == 40 and not acc.unlimited_transfers(mt)
 
 
 def test_a_dead_pasted_token_is_tried_once(tmp_path):
