@@ -210,6 +210,20 @@ def test_wildcard_dropped_by_fpl_is_reported_with_the_fix(world):
     assert "Mismatch" in out.error and "no longer active" in out.error and "FPL site" in out.error
 
 
+def test_points_already_lost_are_reported_by_every_later_run(world):
+    """GW11: the retry found the squad in place, set the line-up and reported "team updated" over a -40."""
+    players, squad, bs = world
+    fpl = FakeFPL(players, squad, free=2)
+    fpl.made = 12                                     # the Wildcard was dropped and all 12 transfers charged
+    out = run(target(players, squad), fpl, bs)
+    assert out.ok and out.points_cost == 40           # nothing wrong with this run's own requests ...
+    s = autopilot.Settings(enabled=True, max_hits=1)
+    msg = autopilot.overspent(out.points_cost, 11, s)  # ... but the account is still 36 points over the limit
+    assert msg and "40 points" in msg and "Wildcard" in msg and "FPL site" in msg
+    assert autopilot.overspent(4, 11, s) is None and autopilot.overspent(0, 11, s) is None
+    assert autopilot.overspent(4, 11, autopilot.Settings(enabled=True, max_hits=0))
+
+
 def test_wildcard_needs_a_free_transfer_to_test_with(world):
     players, squad, bs = world
     fpl, rec = FakeFPL(players, squad, free=0), target(players, squad, swaps=5, chip="wildcard")

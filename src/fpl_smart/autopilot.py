@@ -220,6 +220,19 @@ def result_report(bs: dict, log=print) -> bool:
     return False
 
 
+def overspent(spent: int, gw: int, s: Settings) -> str | None:
+    """More points spent on this gameweek's transfers than the autopilot may spend on its own.
+    It is read from the account on every run, so it is reported until it is put right and not only
+    by the run that caused it. In GW11 the run after the one that lost the Wildcard found the squad
+    already in place, set the line-up and reported "team updated" over a -40."""
+    allowed = 4 * max(0, s.max_hits)
+    if spent <= allowed:
+        return None
+    return (f"FPL shows {spent} points spent on GW{gw} transfers, more than the {allowed} the autopilot may spend "
+            "on its own. If a Wildcard or Free Hit was meant to cover them, play it on the FPL site before the "
+            "deadline and the points are given back. If you took these hits yourself, nothing needs doing.")
+
+
 def status_text(gw: int, deadline: pd.Timestamp, now: pd.Timestamp, mode: str, lines: list[str],
                 problems: list[str]) -> str:
     L = [f"# FPL autopilot: gameweek {gw}", "",
@@ -353,6 +366,12 @@ def _run(force: bool, dry_run: bool, quick: bool, apply_now: bool, log) -> int:
             lines.append(f"It will act once the deadline is within {s.apply_within_h:.0f} hours.")
         elif private is not None and in_play:
             lines.append(f"It will act once GW{cur['id']} has finished.")
+    # A run that stopped says why itself; any other run checks the account's points for transfers.
+    spent = outcome.points_cost if outcome is not None and outcome.points_cost is not None \
+        else acc.points_spent(private or {})
+    over = overspent(spent, gw, s) if may_write and not (outcome and outcome.error) else None
+    if over:
+        problems.insert(0, over)
 
     done_now = bool(outcome and outcome.ok and not dry_run)
     applied = done_now or bool(last and last.get("applied") and action != "apply")
@@ -382,7 +401,7 @@ def _run(force: bool, dry_run: bool, quick: bool, apply_now: bool, log) -> int:
         moves = len([p for p in w.squad if p not in rec.state.squad])
         _report(
             log, f"GW{gw}: {what}", lines, problems,
-            "error" if outcome and outcome.error else "warn" if problems else "ok" if outcome else "info",
+            "error" if (outcome and outcome.error) or over else "warn" if problems else "ok" if outcome else "info",
             fields={"Plan": f"{CHIP_NAMES.get(w.chip, 'No chip')}; {moves} transfer(s) against the squad it started "
                             f"from; projected {w.xp:.1f} points this gameweek.",
                     "Line-up": lineup + " | Bench: " + ", ".join(str(name.get(p)) for p in w.bench),
