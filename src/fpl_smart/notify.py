@@ -1,11 +1,10 @@
 """Tell the owner what happened, for someone who does not open WSL.
 
 All best effort (a failure here never stops a run):
-* a Windows toast notification with a one-line summary;
 * a copy of the status and the latest plan in a Windows folder (default: Documents\\FPL);
 * a message to a Discord channel, when DISCORD_WEBHOOK_URL is set in `.env`.
 
-Outside WSL (no powershell.exe) the first two do nothing.
+Outside WSL (no powershell.exe) the copy does nothing.
 """
 from __future__ import annotations
 
@@ -16,11 +15,8 @@ import shutil
 import subprocess
 import time
 from pathlib import Path
-from xml.sax.saxutils import escape
 
 import requests
-
-APP_ID = r"{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe"
 
 
 def _powershell(script: str, timeout: int = 20) -> str | None:
@@ -34,22 +30,6 @@ def _powershell(script: str, timeout: int = 20) -> str | None:
         return r.stdout.decode("utf-8", "replace").replace("\r", "").strip() if r.returncode == 0 else None
     except (OSError, subprocess.SubprocessError):
         return None
-
-
-def toast(title: str, text: str) -> bool:
-    xml = (f"<toast><visual><binding template='ToastGeneric'><text>{escape(title)}</text>"
-           f"<text>{escape(text[:300])}</text></binding></visual></toast>").replace("'", '"')
-    script = f"""
-[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
-[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null
-$x = New-Object Windows.Data.Xml.Dom.XmlDocument
-$x.LoadXml(@'
-{xml}
-'@)
-[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{APP_ID}').Show([Windows.UI.Notifications.ToastNotification]::new($x))
-'ok'
-"""
-    return _powershell(script) == "ok"
 
 
 def windows_dir() -> Path | None:

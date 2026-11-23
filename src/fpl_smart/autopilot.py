@@ -235,7 +235,6 @@ def run(force: bool = False, dry_run: bool = False, quick: bool = False, apply_n
             text = "# FPL autopilot\n\n## Needs your attention\n\n- " + msg + "\n"
             (REPORTS / "status.md").write_text(text)
             notify.publish({"status.md": text})
-            notify.toast("FPL autopilot: a run failed", msg)
             _report(log, "A run failed", [], [msg], "error")
         return 1
 
@@ -265,8 +264,6 @@ def _run(force: bool, dry_run: bool, quick: bool, apply_now: bool, log) -> int:
         problem = idle_check(account, gw, deadline, left, now, s, log=log)
         if problem:
             log(f"sign-in problem: {problem}")
-            notify.toast("FPL autopilot needs your attention", "The FPL sign-in has expired, so it cannot act for "
-                         "you. Open Documents\\FPL\\status.md for what to do.")
             notify.publish({"status.md": status_text(gw, deadline, now, "plans only", [], [
                 f"Could not sign in to FPL, so nothing can be changed on your team: {problem}"])})
         return 0
@@ -369,8 +366,6 @@ def _run(force: bool, dry_run: bool, quick: bool, apply_now: bool, log) -> int:
         changed = bool(outcome and outcome.changed)
         what = ("needs your attention" if problems else "team updated" if changed
                 else "team checked, nothing to change" if outcome else "plan ready")
-        if problems or changed or last is None:
-            notify.toast(f"FPL GW{gw}: {what}", (problems or lines)[0])
         pos = rec.projection.players["pos"].to_dict()
         mark = lambda p: str(name.get(p)) + (" (C)" if p == w.captain else " (V)" if p == w.vice else "")  # noqa: E731
         lineup = " | ".join(f"{label}: " + ", ".join(mark(p) for p in w.lineup if pos.get(p) == k)

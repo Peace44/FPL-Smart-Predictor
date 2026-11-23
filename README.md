@@ -333,8 +333,7 @@ After every run that planned or changed something:
 - `reports/status.md` says what it did and whether anything needs you; `reports/actions.log`
   lists every change made to your account; `reports/gwNN/applied-*.json` has the exact requests.
 - On WSL the status and the latest plan are also copied to `Documents\FPL` on the Windows side
-  (`FPL_WINDOWS_DIR` changes the folder, `off` disables it), and a Windows notification appears
-  when your team was changed or something needs your attention, such as an expired sign-in.
+  (`FPL_WINDOWS_DIR` changes the folder, `off` disables it).
 - With `DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...` in `.env` (Discord: channel
   settings → Integrations → Webhooks), a report goes to that channel for:
   - every run that planned or acted: what it did, the plan, the line-up, anything that needs you;
