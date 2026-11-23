@@ -222,7 +222,8 @@ def elite_entries(gw: int, previous: dict | None, now_is_gw: bool, max_age_h: fl
     if not rows:
         return [], "standings unavailable"
     if now_is_gw:
-        before = sorted([r for r in rows if r.get("last_rank") and r["last_rank"] <= ELITE_N], key=lambda r: r["last_rank"])
+        before = sorted([r for r in rows if r.get("last_rank") and r["last_rank"] <= ELITE_N],
+                        key=lambda r: r["last_rank"])[:ELITE_N]   # managers tied on rank: keep 50
         if len(before) >= 0.8 * ELITE_N:
             return [r["entry"] for r in before], f"top {ELITE_N} before GW{gw} ({len(before)} found)"
     top = sorted(rows, key=lambda r: r["rank_sort"])[:ELITE_N]

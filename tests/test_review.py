@@ -95,6 +95,16 @@ def test_review_data_round_trip_keeps_notes():
     assert gwreview.existing_notes(again) == gwreview.existing_notes(text)
 
 
+def test_elite_entries_keep_at_most_elite_n_when_last_ranks_tie(monkeypatch):
+    n = gwreview.ELITE_N
+    rows = [{"entry": i, "last_rank": min(i, n), "rank_sort": i} for i in range(1, n + 2)]  # n and n+1 tie at n
+    monkeypatch.setattr(gwreview, "_standings_page",
+                        lambda page, max_age_h: {"standings": {"results": rows if page == 1 else []}})
+    ids, how = gwreview.elite_entries(12, None, now_is_gw=True)
+    assert ids == list(range(1, n + 1))
+    assert how == f"top {n} before GW12 ({n} found)"
+
+
 # ----------------------------------------------------------------------------- tuning store
 @pytest.fixture()
 def tuned(tmp_path, monkeypatch):
