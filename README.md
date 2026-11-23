@@ -34,7 +34,7 @@ Without an odds key the tool still works, using its own team ratings for every f
 | `fpl top --pos MID -n 20` | Best projected players (`--max-price`, `--team`, `--value`) |
 | `fpl player Haaland` | One player's projection per fixture, split into goals, assists, clean sheets, bonus... |
 | `fpl review` | The gameweek review in `reports/gwNN_review.md`: result against projection, progress towards first place, the limiting factor (`--gw N`) |
-| `fpl improve` | Read the latest final review and test one-step changes to every setting; keep one only if it is clearly better (`--dry-run`, `--revert ID`) |
+| `fpl improve` | Read the latest final review and test one-step changes to every setting; keep one only if it is clearly better (`--dry-run`, `--revert ID`; `--code` has Claude Code work on the code-change brief) |
 | `fpl evaluate` | Walk-forward accuracy of the points model; `--save NAME` / `--against NAME` compare two versions of the code |
 | `fpl backtest --season 2025-26` | Replay the optimiser over a finished season |
 | `fpl auto` | Unattended mode: plan when a deadline is near and, if allowed, update your team (for a scheduler) |
@@ -184,24 +184,48 @@ code-change brief. When no setting passes, the run writes a brief for a code cha
 aimed that week. (The settings are at a local optimum: in GW11 none of the 30 one-step changes passed,
 so most weeks end with this brief.) The Claude Code skill **`/fpl-improve`**
 (`.claude/skills/fpl-improve/SKILL.md`) works from that brief: it implements the most promising
-untried idea on a branch, proves it with `fpl evaluate --against` and the tests, records the result in
-the ledger, and asks before merging. When a review missed something, the skill also extends what the
-review measures.
+untried idea on a branch, proves it with `fpl evaluate --against` and the tests, and records the result in
+the ledger. When a review missed something, the skill also extends what the review measures. Run it
+yourself in Claude Code (it asks before merging), or let the scheduler run it.
 
-`scripts/auto.sh` runs `fpl improve --if-due` after each check. It works on a new final review
-only, and only while the next deadline is more than 50 hours away (the autopilot's 48-hour
-planning window plus two hours, so a run ends before planning starts). A review that becomes final
-inside that window waits until the deadline has passed, and is worked on then unless the next
-gameweek's review is final first. To switch it off, set `FPL_SELF_IMPROVE=off` in the environment
-of the scheduled task (for cron, put `FPL_SELF_IMPROVE=off` before the command).
+**`fpl improve --code`** runs the skill unattended: Claude Code works on the brief headless, in a git
+worktree of its own on a new branch (`improve/gwNN-auto`), and nothing is merged into `main` without
+you. The autopilot plays from the main working tree, which the session never touches. The worktree
+shares `.venv` and the downloads in `data/raw`, and has copies of `data/processed`, `reports` and the
+live tuning files, so trial code cannot change what the autopilot reads. Its `.env` holds only
+`FPL_TEAM_ID`, with no sign-in, odds key or webhook. The session may run the tests, `fpl evaluate`,
+`review`, `backtest`, `player` and `top`, and git on its own branch. Anything else is refused, not
+asked: it cannot reach your FPL account, push, merge or browse. Afterwards the run checks the result
+rather than trusting it. A change reported as kept must have commits, and the test suite must pass on
+its branch. The account goes to `reports/gwNN_code_change.md`, the idea to `tuning/ledger.md` (so a
+rejected one is not tried again), and the result to Discord. A kept change waits for you:
+`git merge improve/gwNN-auto`, or `git branch -D improve/gwNN-auto` to drop it. A session gets at most
+four hours and is stopped before the planning window opens. It runs on your Claude Code sign-in and
+plan (`FPL_IMPROVE_MODEL` picks the model; the default is your Claude Code default). If `claude` is not
+on the scheduler's PATH or in `~/.local/bin`, set `FPL_CLAUDE` to its full path. If its sign-in lapses,
+the run fails and says so; run `claude` once to sign in again (or `claude setup-token` for a long-lived
+token).
+
+`scripts/auto.sh` runs `fpl improve --if-due` after each check, then `fpl improve --code --if-due`.
+The first works on a new final review only, and only while the next deadline is more than 50 hours
+away (the autopilot's 48-hour planning window plus two hours, so a run ends before planning starts). A
+review that becomes final inside that window waits until the deadline has passed, and is worked on then
+unless the next gameweek's review is final first. The second runs once for each brief a scheduled
+`fpl improve` wrote, when at least an hour is left before the planning window opens. Neither runs
+again by itself after a failure. To switch both off, set `FPL_SELF_IMPROVE=off` in the environment of
+the scheduled task (for cron, put `FPL_SELF_IMPROVE=off` before the command). To keep tuning the
+settings but stop the unattended code changes, set `FPL_SELF_IMPROVE_CODE=off`.
 
 What Discord tells you about a scheduled run:
 
 | Report | Meaning | What you do |
 |---|---|---|
 | "GWnn self-improvement: *factor*", green | A setting changed (`fpl improve --revert ID` undoes it) | Nothing |
-| the same, blue | No setting changed. It says why: none passed, or a test could not run (the availability test needs projections saved before three deadlines) | Optional: run `/fpl-improve` on the brief. The autopilot carries on either way |
+| the same, blue | No setting changed. It says why: none passed, or a test could not run (the availability test needs projections saved before three deadlines) | Nothing: Claude Code works on the brief next (with `FPL_SELF_IMPROVE_CODE=off`, run `/fpl-improve` yourself if you like). The autopilot carries on either way |
 | "GWnn self-improvement failed", red | The run stopped with an error; the traceback is in `reports/auto.log` | Look at the error; the next run tries again. The same error is reported once per gameweek |
+| "GWnn code change ready to merge", green | Claude Code made a change that passed its validation, and the test suite passes on its branch | Read `reports/gwNN_code_change.md` and the diff (`git diff main...improve/gwNN-auto`), then `git merge improve/gwNN-auto`, or `git branch -D improve/gwNN-auto` to drop it |
+| "GWnn code change tried and rejected", or "nothing well aimed this week", blue | An idea failed validation and is recorded in the ledger, or the evidence did not point at a change yet | Nothing |
+| "GWnn code change failed", red | The session ran out of time, ended without a result, or its kept change failed the tests; its worktree is kept for a look | Read the report. `fpl improve --code` runs it again; `git worktree remove --force <path>` clears the worktree |
 
 A gameweek no run worked on (the computer was off or every run failed while it was due) is named
 in the next run's report and in `tuning/ledger.md`. A review that is waiting for a deadline to pass

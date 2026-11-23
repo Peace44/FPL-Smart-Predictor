@@ -171,6 +171,9 @@ def cmd_improve(a) -> int:
                               f"- Result: change #{ch['id']} {ch['key']} {ch['old']:g} → {ch['new']:g} (undoes #{a.revert})"])
         print(f"{ch['key']} is back to {ch['new']:g} (change #{ch['id']}).")
         return 0
+    if a.code:
+        from . import codechange
+        return codechange.run(a.review, if_due=a.if_due, log=_log)
     return improve.run(a.review, dry_run=a.dry_run, factor=a.factor, heavy=not a.light, if_due=a.if_due, log=_log)
 
 
@@ -284,6 +287,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--if-due", action="store_true",
                    help="for the scheduler: only for a new final review, and not close to a deadline")
     p.add_argument("--revert", type=int, metavar="ID", help="undo change ID from tuning/params.json")
+    p.add_argument("--code", action="store_true",
+                   help="have Claude Code work on the code-change brief unattended (/fpl-improve), on a branch "
+                        "in its own worktree; nothing is merged")
     p.set_defaults(fn=cmd_improve)
 
     p = sub.add_parser("evaluate", help="walk-forward accuracy of the points model with the current code and settings")

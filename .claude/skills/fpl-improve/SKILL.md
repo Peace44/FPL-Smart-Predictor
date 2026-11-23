@@ -23,7 +23,9 @@ before keeping it. Work from evidence, one change at a time.
 ## 2. Settings first: `fpl improve`
 
 - If `reports/gwNN_improvement.md` already exists for this review (the scheduler runs
-  `fpl improve --if-due` on its own unless `FPL_SELF_IMPROVE=off`), read it. Otherwise run
+  `fpl improve --if-due` on its own unless `FPL_SELF_IMPROVE=off`), read it. If
+  `reports/gwNN_code_change.md` exists too, an unattended run of this skill already worked on the
+  brief: read it, and don't repeat its idea. Otherwise run
   `.venv/bin/fpl improve <review>`. It tests every setting: 5 to 10 minutes for the points model
   and availability, then about 30 for the optimiser replay; use `--light` to skip that replay.
 - If it changed a setting: report the knob, old and new values, and the evidence (z-scores). Run
@@ -81,6 +83,39 @@ captain picked against 90% of the top 50 every week), extend `src/fpl_smart/gwre
 future review measures it. Add an observation, a field in the embedded data, or a new factor with
 its `LEVERS` and `improve.STRUCTURAL` entries. Add a test in `tests/test_review.py`. A new
 factor must keep the parts adding up to the gap with the top 50, or be reported beside them.
+
+## Unattended runs
+
+`fpl improve --code` (the scheduler, after a scheduled `fpl improve` wrote a brief and changed no
+setting) starts this skill headless with Claude Code, and nobody can answer. When the prompt says
+"Unattended run", these rules replace the matching steps above:
+
+- You are in a git worktree made for this run, already on its own branch (named in the prompt). Commit
+  there. Do not create, switch, merge or push branches, and do not touch the main working tree: the
+  autopilot plays from it. `main` changes only when the user merges your branch.
+- The brief exists: skip step 2. Work on one idea at most.
+- Wherever a step says to ask the user, or to stop unless the user wants to go ahead, stop there and
+  report. In particular, when no change is well aimed (step 3.1, "Neither") and no bug is visible,
+  the outcome is `no_change`: do not guess.
+- Do not edit `tuning/ledger.md` or `tuning/params.json`. They are copies of the live files, kept out
+  of your commits. Put the ledger line (step 6's format) in `ledger_line`, and the scheduler appends
+  it to the live ledger.
+- Run every command in the foreground: the session ends when you give your answer. Keep to the time
+  budget in the prompt. If a validation the change needs cannot finish in time (the backtests are
+  slow), revert the change, say so, and answer `failed` with an empty `ledger_line`, so the idea can
+  be tried again in a week with more time.
+- Some commands are not permitted (the FPL account, the network outside the `fpl` commands, git
+  beyond this branch). A refused command is a boundary, not a problem to work around.
+- A change to the review itself (step 4) counts as a code change: `kept` once its test passes and
+  `fpl review --gw NN` still writes the review.
+- Your final answer is the structured result the run asks for:
+  - `kept`: committed on the branch, and every validation step 5 asks for passed.
+  - `rejected`: tried, failed validation, reverted.
+  - `no_change`: nothing well aimed, nothing tried.
+  - `failed`: could not finish.
+
+  `summary` is one or two plain sentences with the numbers. `report` is the full account in
+  Markdown. The scheduler runs the test suite on the branch again before it reports a kept change.
 
 ## Ground rules
 

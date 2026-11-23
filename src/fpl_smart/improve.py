@@ -323,17 +323,30 @@ def aim(f: str, cert: dict | None, found: list[evidence.Finding]) -> str:
 
 def result_lines(f: str, outcomes: list[Outcome], adopted: Trial | None, brief: str,
                  skipped: list[tuple[int, str]] = (), cert: dict | None = None,
-                 found: list[evidence.Finding] = ()) -> list[str]:
+                 found: list[evidence.Finding] = (), auto_code: bool = False) -> list[str]:
     """The Discord report of a run: what changed, or why nothing did and what you can do about it."""
     if adopted:
         L = [f"Changed {adopted.knob} {adopted.old:g} → {adopted.new:g} ({adopted.primary.metric} better by "
              f"{adopted.primary.z:.1f} s.e.). Nothing for you to do."]
     else:
         L = [unchanged(outcomes)] + ([aim(f, cert, list(found))] if cert is not None else []) + [
-             f"A brief for a code change is in {brief}. To act on it, run /fpl-improve in Claude Code "
-             "(optional: the autopilot carries on with the current settings either way)."]
+             f"A brief for a code change is in {brief}. " + (
+                 "Claude Code works on it next with /fpl-improve, unattended, on a branch of its own; its result "
+                 "follows in another report." if auto_code else
+                 "To act on it, run /fpl-improve in Claude Code (optional: the autopilot carries on with the "
+                 "current settings either way).")]
     L += [f"GW{g} was never worked on: {why}." for g, why in skipped]
     return L
+
+
+def hours_free() -> tuple[float, int | None]:
+    """Hours a run may still take before the autopilot's planning window for the next deadline opens
+    (deadline less plan_within_h + MARGIN_H), and that gameweek. Unlimited when FPL lists no next one."""
+    nxt = next((e for e in fpl_api.bootstrap(1.0)["events"] if e["is_next"]), None)
+    if nxt is None:
+        return float("inf"), None
+    left = (pd.Timestamp(nxt["deadline_time"]) - pd.Timestamp.now(tz="UTC")).total_seconds() / 3600
+    return left - (Settings.from_env().plan_within_h + MARGIN_H), nxt["id"]
 
 
 def due(log=print) -> Path | None:
@@ -345,15 +358,12 @@ def due(log=print) -> Path | None:
     d = gwreview.parse(f.read_text())
     if d["gw"] <= _state().get("done_gw", 0):
         return None
-    bs = fpl_api.bootstrap(1.0)
-    nxt = next((e for e in bs["events"] if e["is_next"]), None)
-    if nxt is not None:
-        left = (pd.Timestamp(nxt["deadline_time"]) - pd.Timestamp.now(tz="UTC")).total_seconds() / 3600
+    free, nxt = hours_free()
+    if free < 0:
         cutoff = Settings.from_env().plan_within_h + MARGIN_H
-        if left < cutoff:
-            log(f"improve: GW{d['gw']} review waits; the GW{nxt['id']} deadline is {left:.0f} hours away "
-                f"(runs only more than {cutoff:.0f} hours before it)")
-            return None
+        log(f"improve: GW{d['gw']} review waits; the GW{nxt} deadline is {free + cutoff:.0f} hours away "
+            f"(runs only more than {cutoff:.0f} hours before it)")
+        return None
     return f
 
 
@@ -436,14 +446,18 @@ def _run(path: Path, dry_run: bool, factor: str | None, heavy: bool, budget_min:
     report = render(gw, path, data, f, avg, win, outcomes, adopted, change, dry_run, cert=cert, found=found)
     out = REPORTS / f"gw{gw:02d}_improvement.md"
     if not dry_run:
+        from . import codechange               # imports this module
         skipped = missed(gw)
         for g, why in skipped:
             log(f"improve: GW{g} was never worked on: {why}")
         out.write_text(report)
         tuning.append_ledger(_ledger(gw, f, avg, outcomes, adopted, change, skipped, cert=cert, found=found))
         _mark_done(gw)
+        if scheduled and adopted is None:      # the brief is for the unattended /fpl-improve run (codechange.py)
+            _save_state(brief_gw=gw)
         _report(log, f"GW{gw} self-improvement: {f}",
-                result_lines(f, outcomes, adopted, f"reports/{out.name}", skipped, cert=cert, found=found),
+                result_lines(f, outcomes, adopted, f"reports/{out.name}", skipped, cert=cert, found=found,
+                             auto_code=scheduled and codechange.enabled()),
                 kind="ok" if adopted else "info")
         log(f"written {out}")
     else:

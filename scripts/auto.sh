@@ -24,8 +24,12 @@ for attempt in $(seq 1 "$tries"); do
   fi
 done
 # After a gameweek's review is final, and while no deadline is close, test one-step changes to every
-# setting (fpl improve). It runs inside the lock, so no plan runs meanwhile, and reports its own
-# result or failure to Discord. FPL_SELF_IMPROVE=off switches it off.
+# setting (fpl improve). When none passes, Claude Code works on the code-change brief it wrote
+# (fpl improve --code: /fpl-improve unattended, on a branch in its own worktree, never merged), and
+# stops before the planning window opens. Both run inside the lock, so no plan runs meanwhile, and
+# report their own result or failure to Discord. FPL_SELF_IMPROVE=off switches both off;
+# FPL_SELF_IMPROVE_CODE=off only the second.
 if [ "${FPL_SELF_IMPROVE:-on}" != "off" ]; then
   .venv/bin/fpl improve --if-due > /dev/null || echo "self-improvement run ended with an error"
+  .venv/bin/fpl improve --code --if-due > /dev/null || echo "code-change run ended with an error"
 fi
