@@ -6,7 +6,7 @@ import pandas as pd
 from .config import CHIP_NAMES, POS
 from .gwreview import md_table
 from .planner import Recommendation
-from .solver import GWPlan, Plan
+from .solver import GWPlan
 
 STATUS = {"d": "doubtful", "i": "injured", "s": "suspended", "u": "unavailable", "n": "unavailable"}
 
@@ -50,11 +50,6 @@ class _View:
         chance = "" if pd.isna(r["chance"]) else f" {int(r['chance'])}%"
         news = f": {r['news']}" if isinstance(r["news"], str) and r["news"] else ""
         return f"{STATUS.get(r['status'], 'flagged')}{chance}{news}"
-
-
-def _chip_line(plan: Plan) -> str:
-    c = plan.chips
-    return ", ".join(f"{CHIP_NAMES[k]} GW{c[k]}" for k in CHIP_NAMES if k in c) or "none"
 
 
 def _lineup_table(v: _View, w: GWPlan) -> str:
