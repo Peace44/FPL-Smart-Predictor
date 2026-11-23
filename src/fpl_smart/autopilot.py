@@ -345,7 +345,9 @@ def _run(force: bool, dry_run: bool, quick: bool, apply_now: bool, log) -> int:
     settled = bool(last and last.get("settled") and last.get("gw") == gw)
     hits_taken = acc.points_spent(private or {}) // 4
     quick = quick or settled or left < 0.75        # a full search would not finish before the deadline
-    kw = dict(quick=quick, sims=0 if quick else 20,
+    # No confidence check (sims): its only output is the report's "How sure is this" section, which
+    # nobody reads before an unattended run acts, and it took 86 s of the GW11 run. `fpl plan` keeps it.
+    kw = dict(quick=quick, sims=0,
               max_hits=max(0, s.max_hits - hits_taken), private=private,
               banned=_env_list("FPL_BAN"), locked=_env_list("FPL_LOCK"), log=log)
     if settled:
