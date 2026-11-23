@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from . import fpl_api
+from . import account, fpl_api
 
 MAX_FT = 5
 
@@ -83,8 +83,7 @@ def load(team_id: int, bs: dict | None = None, free_transfers: int | None = None
     vice = next((p["element"] for p in picks["picks"] if p["is_vice_captain"]), None)
     bank = picks["entry_history"]["bank"]
 
-    active = next((c.get("name") for c in (private or {}).get("chips") or []
-                   if c.get("status_for_entry") == "active" or c.get("is_pending") is True), None)
+    active = account.active_chip(private or {})
     # transfers already confirmed for the upcoming gameweek (under an active free hit they build
     # the one-week squad, not this one)
     pending = [] if active == "freehit" else [t for t in transfers if t["event"] == nxt]
