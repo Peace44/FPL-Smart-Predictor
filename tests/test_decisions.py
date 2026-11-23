@@ -9,7 +9,7 @@ from fpl_smart import backtest, optimise, planner, report
 from fpl_smart.solver import Plan, SolverOptions, hold_value, solve
 from fpl_smart.xp import Projection
 
-from conftest import SMALL, check_squad
+from conftest import SMALL
 
 CHIPS = [{"name": n, "gws": [1, 2, 3]} for n in ("wildcard", "freehit", "bboost", "3xc")]
 
@@ -106,8 +106,6 @@ def test_season_replay_runs_and_keeps_the_rules(market):
         mins = pd.Series(np.where(rng.random(len(xp)) < 0.9, 90, 0), index=xp.index)
         data[g] = backtest.GWData(g, xp.loc[:, [c for c in xp.columns if c >= g]], players,
                                   (pts * (mins > 0)).to_dict(), mins.to_dict())
-    from conftest import SMALL
-    from fpl_smart.solver import SolverOptions
     base = SolverOptions(per_pos_keep=dict(SMALL))
     res = {s: backtest.simulate(data, "test", s, horizon=3, opt=base, initial_horizon=3) for s in backtest.STRATEGIES}
     for r in res.values():

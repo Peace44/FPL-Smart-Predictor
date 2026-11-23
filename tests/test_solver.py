@@ -2,10 +2,9 @@ from dataclasses import replace
 
 import pytest
 
-from fpl_smart.my_team import TeamState
 from fpl_smart.solver import best_eleven, chip_windows, hold_value, solve
 
-from conftest import check_squad, empty_state, initial_plan
+from conftest import check_squad, initial_plan
 
 
 def test_initial_squad_is_legal_and_affordable(market, opts):

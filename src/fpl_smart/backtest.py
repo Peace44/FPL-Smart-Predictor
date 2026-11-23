@@ -13,7 +13,6 @@ from __future__ import annotations
 import pickle
 from dataclasses import dataclass, field, replace
 
-import numpy as np
 import pandas as pd
 
 from . import history, market
