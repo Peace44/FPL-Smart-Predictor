@@ -1,6 +1,12 @@
 import time, numpy as np, pandas as pd
-from sklearn.metrics import log_loss, brier_score_loss
 from fpl_smart import history, minutes as MN
+
+def log_loss(y, p):
+    """Mean binary cross-entropy (as sklearn.metrics.log_loss for 0/1 labels)."""
+    eps = np.finfo(float).eps
+    y, p = np.asarray(y, float), np.clip(np.asarray(p, float), eps, 1 - eps)
+    return float(-np.mean(y * np.log(p) + (1 - y) * np.log(1 - p)))
+
 t=time.time()
 m = history.load_matches()
 ms = MN.add_state(m); print('state', round(time.time()-t,1),'s', ms.shape)

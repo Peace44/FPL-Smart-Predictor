@@ -9,7 +9,7 @@ description = "FPL decision engine: data pipeline, expected-points model, multi-
 requires-python = ">=3.11"
 dependencies = [
   "requests", "pandas", "numpy", "scipy", "pyarrow", "pulp>=2.9,<4", "highspy",
-  "lightgbm", "scikit-learn",
+  "lightgbm",
 ]
 
 [project.optional-dependencies]
