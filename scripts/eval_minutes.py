@@ -33,4 +33,3 @@ for s, g in ev.groupby('season'):
         (g.minutes-g.emin).abs().mean(), (g.minutes-b.min_e5.fillna(20)).abs().mean(), np.sqrt(((g.minutes-g.emin)**2).mean())))
 print('calibration p60:'); print(ev.groupby(pd.cut(ev.p60_p,[0,.02,.1,.25,.5,.75,.9,.97,1], include_lowest=True)).agg(n=('y60','size'), pred=('p60_p','mean'), act=('y60','mean')).round(3))
 imp = pd.Series(mdl.models['p60'].feature_importance('gain'), index=MN.FEATURES).sort_values(ascending=False); print((imp/imp.sum()).round(3).head(15).to_dict())
-P.to_parquet('data/processed/minutes_wf.parquet')

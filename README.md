@@ -80,9 +80,9 @@ Useful `fpl plan` options:
 ## How good is it
 
 **Points model.** Trained only on earlier data and tested on each later season, its
-projections correlate 0.37 (2024-25), 0.34 (2025-26) and 0.38 (2026-27 so far) with the
-actual points of likely starters, and run about 0.1 points per player-match low
-(`scripts/eval_xp.py`).
+projections correlate 0.37 (2024-25), 0.33 (2025-26) and 0.38 (2026-27 so far) with the
+actual points of likely starters (averaged over gameweeks), and run 0.07 to 0.1 points per
+player-match low (`fpl evaluate`).
 
 **Optimiser.** `fpl backtest` replays a season one gameweek at a time, using only what was
 known before each deadline, starting from the engine's own GW1 squad. No chips are played
@@ -366,7 +366,7 @@ repeats it on every run until they are updated.
 .venv/bin/pip install -e ".[dev]"
 .venv/bin/python -m pytest                       # about a minute, no network needed
 .venv/bin/python scripts/eval_minutes.py         # walk-forward check of the minutes model
-.venv/bin/python scripts/eval_xp.py              # walk-forward check of the points model
+.venv/bin/fpl evaluate                           # walk-forward check of the points model
 .venv/bin/python scripts/tune_optimiser.py       # compare optimiser settings on past seasons
 ```
 

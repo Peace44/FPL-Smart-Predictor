@@ -3,7 +3,7 @@ compared pair-wise (same gameweeks, same players) with an honest standard error.
 
 * points model: every player-match of the test seasons is projected using only what was known
   before its gameweek (team ratings refitted each gameweek, the minutes model trained before the
-  season, calibration fitted on earlier data). This is `scripts/eval_xp.py` as a library.
+  season, calibration fitted on earlier data).
 * availability: the projections saved before each live deadline, re-scored under other readings of
   FPL's injury flags (`reports/gwNN/projection-*.parquet`; only exists from GW11 2026-27 on).
 * planning: the optimiser replayed over a season (`backtest.simulate`), points by gameweek.
