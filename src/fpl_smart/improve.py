@@ -16,13 +16,17 @@ and within hard bounds (tuning.KNOBS), and only when it beats the current value 
 errors without making the guard metric or the current season clearly worse. Over the weeks that
 is coordinate descent on whatever the reviews keep finding limiting.
 
-When no setting passes, the limit is in the code, not the settings: the run writes a brief for a
-code change (`reports/gwNN_improvement.md`) that the `fpl-improve` skill works from.
+When no setting passes, or none covers the factor, the limit is likely in the code: the run writes a
+brief for a code change (`reports/gwNN_improvement.md`) that the `fpl-improve` skill works from. The Discord
+report says which of the reasons it was (no setting covers the factor, none passed, a test could
+not run) and names the skill. A scheduled run that fails is reported too, once per gameweek and
+kind of error, and a gameweek that no run worked on is named in the next run's report.
 """
 from __future__ import annotations
 
 import json
 import time
+import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -31,7 +35,7 @@ import pandas as pd
 
 from . import evaluate as ev
 from . import fpl_api, gwreview, notify, tuning
-from .autopilot import Settings
+from .autopilot import Settings, _report
 from .config import REPORTS
 
 Z_ADOPT = 3.0          # many candidates are tried each run; 3 s.e. keeps false adoptions rare
@@ -236,6 +240,79 @@ def _state() -> dict:
         return {}
 
 
+def _save_state(**kw) -> None:
+    REPORTS.mkdir(parents=True, exist_ok=True)
+    STATE.write_text(json.dumps({**_state(), **kw}))
+
+
+def missed(gw: int) -> list[tuple[int, str]]:
+    """Gameweeks after the last one worked on and before `gw` that no run worked on, each with why.
+    None before the first run: earlier reviews may be ones written by hand to fill in the history."""
+    st = _state()
+    done = st.get("done_gw")
+    if not done:
+        return []
+    fail = st.get("failed") or {}
+    return [(g, f"its runs ended with {fail['error']}" if fail.get("gw") == g else
+             "no scheduled run came while it was due") for g in range(done + 1, gw)]
+
+
+def failed(path: Path | None, e: Exception, log=print) -> bool:
+    """Report a scheduled run that stopped with an error. The same error for the same gameweek is
+    reported once, and only marked reported once Discord has it, so a run with no network tries again."""
+    gw = None
+    try:
+        gw = (gwreview.parse(path.read_text()) or {}).get("gw") if path else None
+    except Exception:  # noqa: BLE001  (the review itself may be what failed)
+        pass
+    error = type(e).__name__
+    if _state().get("failed") == {"gw": gw, "error": error}:
+        log(f"improve: same error as the last run ({error}); already reported")
+        return False
+    what = f"GW{gw} self-improvement" if gw else "Self-improvement"
+    ok = _report(log, f"{what} failed", [f"`fpl improve --if-due` stopped with {error}: {e}"],
+                 ["The traceback is in reports/auto.log. The next scheduled run tries again; "
+                  "this error is not reported again for this gameweek."], kind="error")
+    if ok:
+        _save_state(failed={"gw": gw, "error": error})
+    return ok
+
+
+def _closest(outcomes: list[Outcome]) -> str:
+    ts = [t for o in outcomes for t in o.trials if t.primary and np.isfinite(t.primary.z)]
+    t = max(ts, key=lambda t: t.primary.z, default=None)
+    return (f" (closest: {t.knob} {t.old:g} → {t.new:g} at {t.primary.z:+.1f} s.e., "
+            f"{t.primary.diff:+.4f} {t.primary.metric})") if t else ""
+
+
+def unchanged(f: str, outcomes: list[Outcome]) -> str:
+    """Why no setting changed. Only when every test for the factor ran is the limit known to be in the code."""
+    if not outcomes:
+        return f"No setting covers {f}, so only a code change can move it."
+    ran = [o for o in outcomes if not o.skipped]
+    skipped = "; ".join(f"{o.experiment}: {o.skipped.rstrip('.')}" for o in outcomes if o.skipped)
+    if not ran:
+        return f"No test could run ({skipped}), so it is not known whether a setting would help."
+    if skipped:
+        return (f"No setting passed the tests that ran{_closest(outcomes)}. Not run: {skipped}. "
+                "The limit may be in the code, or in a setting the missing test covers.")
+    return f"No setting passed the test{_closest(outcomes)}: the limit is in the code."
+
+
+def result_lines(f: str, outcomes: list[Outcome], adopted: Trial | None, brief: str,
+                 skipped: list[tuple[int, str]] = ()) -> list[str]:
+    """The Discord report of a run: what changed, or why nothing did and what you can do about it."""
+    if adopted:
+        L = [f"Changed {adopted.knob} {adopted.old:g} → {adopted.new:g} ({adopted.primary.metric} better by "
+             f"{adopted.primary.z:.1f} s.e.). Nothing for you to do."]
+    else:
+        L = [unchanged(f, outcomes),
+             f"A brief for a code change is in {brief}. To act on it, run /fpl-improve in Claude Code "
+             "(optional: the autopilot carries on with the current settings either way)."]
+    L += [f"GW{g} was never worked on: {why}." for g, why in skipped]
+    return L
+
+
 def due(log=print) -> Path | None:
     """For the scheduler: a final review not yet worked on, and the planning window for the next
     deadline not yet open (more than plan_within_h + MARGIN_H hours away)."""
@@ -259,11 +336,23 @@ def due(log=print) -> Path | None:
 
 def run(review: str | None = None, dry_run: bool = False, factor: str | None = None, heavy: bool = True,
         if_due: bool = False, budget_min: float = HEAVY_BUDGET_MIN, log=print) -> int:
-    path = Path(review) if review else (due(log) if if_due else latest_final_review())
-    if path is None:
-        if not if_due:
+    if not if_due:
+        path = Path(review) if review else latest_final_review()
+        if path is None:
             log("no final review found: run `fpl review` once the gameweek's data is checked")
-        return 0 if if_due else 2
+            return 2
+        return _run(path, dry_run, factor, heavy, budget_min, log)
+    path = Path(review) if review else None
+    try:
+        path = path or due(log)
+        return 0 if path is None else _run(path, dry_run, factor, heavy, budget_min, log)
+    except Exception as e:  # noqa: BLE001  (unattended: say so on Discord; auto.sh only writes the log)
+        log("improve: the run failed\n" + traceback.format_exc().rstrip())
+        failed(path, e, log)
+        return 1
+
+
+def _run(path: Path, dry_run: bool, factor: str | None, heavy: bool, budget_min: float, log) -> int:
     text = path.read_text()
     data = gwreview.parse(text)
     if data is None:
@@ -316,15 +405,18 @@ def run(review: str | None = None, dry_run: bool = False, factor: str | None = N
     report = render(gw, path, data, f, avg, win, outcomes, adopted, change, dry_run)
     out = REPORTS / f"gw{gw:02d}_improvement.md"
     if not dry_run:
+        skipped = missed(gw)
+        for g, why in skipped:
+            log(f"improve: GW{g} was never worked on: {why}")
         out.write_text(report)
-        tuning.append_ledger(_ledger(gw, f, avg, outcomes, adopted, change))
-        STATE.write_text(json.dumps({**_state(), "done_gw": gw, "when": str(pd.Timestamp.now(tz="UTC").floor("s"))}))
+        tuning.append_ledger(_ledger(gw, f, avg, outcomes, adopted, change, skipped))
+        st = _state()
+        st.pop("failed", None)
+        st.update(done_gw=max(gw, st.get("done_gw", 0)), when=str(pd.Timestamp.now(tz="UTC").floor("s")))
+        STATE.write_text(json.dumps(st))
         notify.publish({out.name: report})
-        line = (f"Changed {adopted.knob} {adopted.old:g} → {adopted.new:g} ({adopted.primary.metric} better by "
-                f"{adopted.primary.z:.1f} s.e.)." if adopted else
-                "No setting passed the test: the limit is in the code. A brief for a code change is in "
-                f"reports/{out.name}.")
-        notify.discord(f"GW{gw} self-improvement: {f}", [line], kind="ok" if adopted else "info")
+        _report(log, f"GW{gw} self-improvement: {f}", result_lines(f, outcomes, adopted, f"reports/{out.name}", skipped),
+                kind="ok" if adopted else "info")
         log(f"written {out}")
     else:
         print(report)
@@ -383,18 +475,11 @@ def render(gw, path, data, f, avg, win, outcomes, adopted, change, dry_run) -> s
         if change:
             L.append("The next plan uses it. The next reviews show whether the factor it targets improves.")
     else:
-        best = [t for o in outcomes for t in o.trials if t.primary and np.isfinite(t.primary.z)]
-        top = max(best, key=lambda t: t.primary.z, default=None)
-        if not outcomes:
-            L.append("No setting covers this factor.")
-        else:
-            L.append("No setting passed the test" + (
-                f" (closest: {top.knob} {top.old:g} → {top.new:g} at {top.primary.z:+.1f} s.e., "
-                f"{top.primary.diff:+.4f} {top.primary.metric})" if top else "") + ".")
+        L.append(unchanged(f, outcomes))
         L += ["", "## Needs a code change", "",
-              f"The settings around the current values cannot move **{f}**. Ideas, most promising first, for the "
-              "`fpl-improve` skill (or you) to implement on a branch, test with `fpl evaluate` and the test suite, and "
-              "record in `tuning/ledger.md`:", ""]
+              f"Ideas for moving **{f}**, most promising first, for the `fpl-improve` skill (run /fpl-improve in "
+              "Claude Code) or you to implement on a branch, test with `fpl evaluate` and the test suite, and record "
+              "in `tuning/ledger.md`:", ""]
         L += [f"{i}. {x}" for i, x in enumerate(STRUCTURAL.get(f, []), 1)]
         notes = gwreview.existing_notes(path.read_text()).strip()
         if notes:
@@ -405,7 +490,7 @@ def render(gw, path, data, f, avg, win, outcomes, adopted, change, dry_run) -> s
     return "\n".join(L) + "\n"
 
 
-def _ledger(gw, f, avg, outcomes, adopted, change) -> list[str]:
+def _ledger(gw, f, avg, outcomes, adopted, change, skipped=()) -> list[str]:
     when = pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%d")
     L = [f"## GW{gw} ({when}): limiting factor {f}" + (f", {avg[f]:+.1f} a week behind the top 50" if f in avg else "")]
     for o in outcomes:
@@ -418,6 +503,7 @@ def _ledger(gw, f, avg, outcomes, adopted, change) -> list[str]:
             f"none passed (best {best.knob} {best.old:g} → {best.new:g}, z {best.primary.z:+.1f})" if best else "none ran"))
     L.append(f"- Result: change #{change['id']} {change['key']} {change['old']:g} → {change['new']:g}" if change else
              f"- Result: no setting changed; code-change brief in reports/gw{gw:02d}_improvement.md")
+    L += [f"- Never worked on: GW{g}, {why}" for g, why in skipped]
     return L
 
 

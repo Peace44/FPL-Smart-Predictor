@@ -167,7 +167,7 @@ records every run. `fpl improve --revert ID` undoes a change. The experiments be
 | hits | optimiser replay | |
 | chips, operations | (no setting covers them) | |
 
-When no setting passes, the limit is in the code. The run then writes a brief for a code change in
+When no setting passes, or no setting covers the factor, the run writes a brief for a code change in
 `reports/gwNN_improvement.md`. The Claude Code skill **`/fpl-improve`**
 (`.claude/skills/fpl-improve/SKILL.md`) works from that brief: it implements the most promising
 untried idea on a branch, proves it with `fpl evaluate --against` and the tests, records the result in
@@ -176,8 +176,22 @@ review measures.
 
 `scripts/auto.sh` runs `fpl improve --if-due` after each check. It works on a new final review
 only, and only while the next deadline is more than 50 hours away (the autopilot's 48-hour
-planning window plus two hours, so a run ends before planning starts). `FPL_SELF_IMPROVE=off` in the
-environment of the scheduled task switches it off.
+planning window plus two hours, so a run ends before planning starts). A review that becomes final
+inside that window waits until the deadline has passed, and is worked on then unless the next
+gameweek's review is final first. `FPL_SELF_IMPROVE=off` in the environment of the scheduled task
+switches it off.
+
+What Discord tells you about a scheduled run:
+
+| Report | Meaning | What you do |
+|---|---|---|
+| "GWnn self-improvement: *factor*", green | A setting changed (`fpl improve --revert ID` undoes it) | Nothing |
+| the same, blue | No setting changed. It says why: no setting covers the factor, none passed, or a test could not run (the availability test needs projections saved before three deadlines) | Optional: run `/fpl-improve` on the brief. The autopilot carries on either way |
+| "GWnn self-improvement failed", red | The run stopped with an error; the traceback is in `reports/auto.log` | Look at the error; the next run tries again. The same error is reported once per gameweek |
+
+A gameweek no run worked on (the computer was off or every run failed while it was due) is named
+in the next run's report and in `tuning/ledger.md`. A review that is waiting for a deadline to pass
+is only noted in `reports/auto.log`.
 
 ## Letting it act for you
 
@@ -317,7 +331,8 @@ After every run that planned or changed something:
   - a run that failed, and a sign-in that has expired;
   - a check with nothing to do yet, at most every six hours, so you can see the schedule is alive;
   - each finished gameweek: points, the game average, overall rank and how far it moved;
-- each gameweek review, with its limiting factor, and each self-improvement run's result.
+  - each gameweek review, with its limiting factor, and each self-improvement run's result or
+    failure (see *The weekly review and self-improvement*).
 
   `reports/auto.log` records whether each report was delivered. Anyone who has the webhook
   address can post to the channel, so keep it out of anything you share.

@@ -199,3 +199,83 @@ def test_improve_waits_for_the_planning_window(tmp_path, monkeypatch, plan_withi
         {"id": 12, "is_next": True, "deadline_time": deadline.isoformat()}]})
     monkeypatch.setattr(improve.Settings, "from_env", classmethod(lambda cls: cls(plan_within_h=plan_within_h)))
     assert (improve.due(log=lambda *_: None) == review) is runs
+
+
+# ----------------------------------------------------------------------------- what a scheduled run reports
+def _trial(z, knob="player.k_goal"):
+    return improve.Trial(knob, 8.0, 5.7, ev.Comparison("mse_rel", 0.001 * z, 0.001, 40, {}))
+
+
+@pytest.mark.parametrize("outcomes,says,not_says", [
+    ([], "No setting covers chips", "limit is in the code"),
+    ([improve.Outcome("points_model", [_trial(1.2)])], "the limit is in the code", "Not run"),
+    ([improve.Outcome("points_model", [_trial(1.2)]), improve.Outcome("availability", skipped="needs 3; has 1")],
+     "Not run: availability: needs 3; has 1", "the limit is in the code"),
+    ([improve.Outcome("availability", skipped="needs 3; has 1")], "No test could run", "limit is in the code"),
+])
+def test_unchanged_report_says_why_and_names_the_skill(outcomes, says, not_says):
+    lines = improve.result_lines("chips", outcomes, None, "reports/gw11_improvement.md")
+    text = " ".join(lines)
+    assert says in text and not_says not in text
+    assert "/fpl-improve" in text and "reports/gw11_improvement.md" in text
+    if any(o.trials for o in outcomes):
+        assert "closest: player.k_goal 8 → 5.7 at +1.2 s.e." in text
+
+
+def test_changed_report_needs_nothing():
+    t = _trial(4.0)
+    text = " ".join(improve.result_lines("squad", [improve.Outcome("points_model", [t], adopted=t)], t, "x.md"))
+    assert text.startswith("Changed player.k_goal 8 → 5.7") and "/fpl-improve" not in text
+
+
+@pytest.fixture
+def state(tmp_path, monkeypatch):
+    monkeypatch.setattr(improve, "STATE", tmp_path / "improve-state.json")
+    monkeypatch.setattr(improve, "REPORTS", tmp_path)
+    return tmp_path
+
+
+def test_missed_gameweeks(state):
+    assert improve.missed(12) == []                                 # never run: earlier reviews are not "missed"
+    improve._save_state(done_gw=9, failed={"gw": 11, "error": "ValueError"})
+    assert improve.missed(12) == [(10, "no scheduled run came while it was due"),
+                                  (11, "its runs ended with ValueError")]
+    assert improve.missed(10) == [] and improve.missed(8) == []
+    lines = improve.result_lines("squad", [], None, "x.md", improve.missed(12))
+    assert "GW10 was never worked on: no scheduled run came while it was due." in lines
+
+
+def test_scheduled_failure_is_reported_once(state, monkeypatch):
+    review = state / "gw11_review.md"
+    review.write_text("")
+    monkeypatch.setattr(gwreview, "parse", lambda text: {"gw": 11, "final": True})
+    monkeypatch.setattr(improve, "due", lambda log: review)
+    sent, delivered = [], [False]
+    monkeypatch.setattr(improve, "_report", lambda log, title, lines=(), problems=(), kind=None: (
+        sent.append((title, kind, lines)) or delivered[0]))
+    err = [ValueError("bad data")]
+
+    def boom(*a, **k):
+        raise err[0]
+    monkeypatch.setattr(improve, "_run", boom)
+    quiet = dict(if_due=True, log=lambda *_: None)
+
+    assert improve.run(**quiet) == 1 and len(sent) == 1            # Discord unreachable: not marked reported
+    assert sent[0][:2] == ("GW11 self-improvement failed", "error") and "ValueError: bad data" in sent[0][2][0]
+    delivered[0] = True
+    assert improve.run(**quiet) == 1 and len(sent) == 2            # tried again, delivered this time
+    assert improve.run(**quiet) == 1 and len(sent) == 2            # same error, same gameweek: once
+    err[0] = KeyError("x")
+    assert improve.run(**quiet) == 1 and len(sent) == 3            # a different error is news
+    assert improve._state()["failed"] == {"gw": 11, "error": "KeyError"}
+
+
+def test_a_manual_run_is_not_caught(state, monkeypatch):
+    review = state / "gw11_review.md"
+    review.write_text("")
+
+    def boom(*a, **k):
+        raise ValueError("bad data")
+    monkeypatch.setattr(improve, "_run", boom)
+    with pytest.raises(ValueError):
+        improve.run(str(review), log=lambda *_: None)
