@@ -95,6 +95,31 @@ def test_review_data_round_trip_keeps_notes():
     assert gwreview.existing_notes(again) == gwreview.existing_notes(text)
 
 
+def test_milestones_track_progress_towards_first_place():
+    """The user asked for milestones in every review; this keeps them from being cleaned away."""
+    def h(gw, pts, rank, overall, cost=0):
+        return {"event": gw, "points": pts, "event_transfers_cost": cost, "rank": rank, "overall_rank": overall}
+    hist = [h(1, 60, 900_000, 900_000), h(2, 40, 3_000_000, 1_200_000), h(3, 70, 400_000, 800_000, cost=4),
+            h(4, 80, 90_000, 450_000)]
+    averages = {1: 50, 2: 45, 3: 60, 4: 55}
+
+    def engine(gw, net, avg, elite):
+        return {"gw": gw, "engine_managed": True, "summary": {"net": net, "average": avg},
+                "elite": {"avg": {"net": elite}}}
+    earlier = [engine(3, 66, 60, 70), engine(5, 99, 50, 60)]      # GW5 is later than the week reviewed
+    lines = gwreview.milestones(hist, 4, earlier, engine(4, 80, 55, 75), averages)
+    assert lines == ["New season-best overall rank: 450,000.",
+                     "Entered the top 500,000.",
+                     "Green arrows in a row: 2.",
+                     "Next milestone: the top 250,000 (200,000 places to go).",
+                     "Best gameweek rank of the season: 90,000.",
+                     "Beat the game average in 3 of 4 gameweeks.",
+                     "Since the engine took over (2 gameweeks): 146 points, +31 against the average, +1 against the top 50."]
+    down = gwreview.milestones(hist[:2], 2, [], {}, averages)
+    assert down == ["Season-best overall rank: 900,000 (GW1).", "Dropped out of the top 1,000,000.",
+                    "Next milestone: the top 1,000,000 (200,000 places to go).", "Beat the game average in 1 of 2 gameweeks."]
+
+
 def test_elite_entries_keep_at_most_elite_n_when_last_ranks_tie(monkeypatch):
     n = gwreview.ELITE_N
     rows = [{"entry": i, "last_rank": min(i, n), "rank_sort": i} for i in range(1, n + 2)]  # n and n+1 tie at n

@@ -874,6 +874,7 @@ def _render_sections(rv: Review, c: dict) -> list[str]:
             prev_or = o or prev_or
         sec += ["", "<details><summary>Season so far</summary>", "",
                 md_table(["GW", "Points", "Average", "GW rank", "Overall rank"], trows), "", "</details>"]
+        sec += ["", "Milestones:", ""] + [f"- {x}" for x in milestones(hist, gw, c["reviews"], D, averages)]
     if D.get("elite"):
         e = D["elite"]
         dfc = D["deficits"]
@@ -943,6 +944,64 @@ def _render_sections(rv: Review, c: dict) -> list[str]:
         sec += ["", "Changes in effect from earlier reviews: " + "; ".join(
             f"#{h['id']} {h['key']} {h['old']:g}→{h['new']:g} ({h['when'][:10]})" for h in hist_t[-5:]) + "."]
     out.append("\n".join(sec))
+    return out
+
+
+# Kept on purpose: the user asked for every review to show the achievements and milestones towards
+# first place in the world. Nothing downstream reads them; they are for the reader. (A cleanup pass
+# deleted them once as "morale, not evidence"; the user asked for them again on 2026-11-23.)
+RANK_BANDS = (10_000_000, 5_000_000, 2_000_000, 1_000_000, 500_000, 250_000, 100_000, 50_000, 10_000,
+              1_000, 100, 10, 1)
+
+
+def _rank_band(rank: int | None) -> int | None:
+    """The smallest top-N band the rank is inside (top 1M, top 100k, ...)."""
+    inside = [b for b in RANK_BANDS if rank and rank <= b]
+    return min(inside) if inside else None
+
+
+def milestones(hist: list[dict], gw: int, reviews: list[dict], D: dict, averages: dict[int, float]) -> list[str]:
+    """Achievements towards first place: best ranks, rank bands crossed, streaks, the next band to reach,
+    and the record since the engine took over. `hist` is FPL's entry history up to `gw`."""
+    out = []
+    g = {h["event"]: h for h in hist}
+    me, prev = g.get(gw), g.get(gw - 1)
+    ranked = [h for h in hist if h.get("overall_rank")]
+    if me and me.get("overall_rank"):
+        best = min(ranked, key=lambda h: h["overall_rank"])
+        if best["event"] == gw and len(ranked) > 1:
+            out.append(f"New season-best overall rank: {_fmt_rank(me['overall_rank'])}.")
+        else:
+            out.append(f"Season-best overall rank: {_fmt_rank(best['overall_rank'])} (GW{best['event']}).")
+        if prev and prev.get("overall_rank"):
+            b0, b1 = _rank_band(prev["overall_rank"]), _rank_band(me["overall_rank"])
+            if b1 and (b0 is None or b1 < b0):
+                out.append(f"Entered the top {b1:,}.")
+            elif b0 and (b1 is None or b1 > b0):
+                out.append(f"Dropped out of the top {b0:,}.")
+        streak = 0
+        for a, b in zip(reversed(ranked[:-1]), reversed(ranked)):
+            if b["overall_rank"] >= a["overall_rank"]:
+                break
+            streak += 1
+        if streak:
+            out.append(f"Green arrows in a row: {streak}.")
+        nxt = max((b for b in RANK_BANDS if b < me["overall_rank"]), default=None)
+        if nxt:
+            out.append(f"Next milestone: the top {nxt:,} ({me['overall_rank'] - nxt:,} places to go).")
+    best_gw = min((h for h in hist if h.get("rank")), key=lambda h: h["rank"], default=None)
+    if me and best_gw and best_gw["event"] == gw and len(hist) > 1:
+        out.append(f"Best gameweek rank of the season: {_fmt_rank(me['rank'])}.")
+    beat = sum(1 for h in hist if h["points"] - h["event_transfers_cost"] > (averages.get(h["event"]) or 0))
+    out.append(f"Beat the game average in {beat} of {len(hist)} gameweeks.")
+    eng = [r for r in reviews if r.get("engine_managed") and r["gw"] < gw] + ([D] if D.get("engine_managed") else [])
+    if eng:
+        tot = sum(r["summary"]["net"] for r in eng)
+        av = sum(r["summary"]["average"] or 0 for r in eng)
+        el = [r["elite"]["avg"]["net"] for r in eng if r.get("elite")]
+        out.append(f"Since the engine took over ({len(eng)} gameweek{'s' if len(eng) != 1 else ''}): {tot} points, "
+                   f"{_signed(tot - av, 0)} against the average"
+                   + (f", {_signed(tot - sum(el), 0)} against the top 50." if len(el) == len(eng) else "."))
     return out
 
 

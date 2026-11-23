@@ -139,7 +139,9 @@ before FPL has checked the data is marked provisional and is rewritten later. It
   P(plays), regulars who did not play, the ten highest projections, and team expected goals against
   the chances teams created.
 - **Towards first place:** points of first place and the top 100 / 1k / 10k / 100k / 1M, the gap and
-  the points a week needed to close it, and the season so far. It also compares your week
+  the points a week needed to close it, the season so far, and milestones (season-best rank, rank
+  bands entered or left, green arrows in a row, the next band to reach, and the record since the
+  engine took over against the game average and the top 50). It also compares your week
   with the top 50 managers as they stood before the gameweek: their captains, the players most of
   them owned that you did not, and your differentials.
 - **What can be improved:** the gap to the top 50 split into five parts that add up exactly: squad
