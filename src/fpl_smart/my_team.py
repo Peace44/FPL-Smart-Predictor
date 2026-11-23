@@ -31,10 +31,6 @@ class TeamState:
     overall_rank: int | None = None
     active_chip: str | None = None        # chip already played for the upcoming deadline (signed-in data only)
 
-    @property
-    def squad_sell_value(self) -> int:
-        return sum(self.sell_price[p] for p in self.squad)
-
 
 def selling_price(buy: int, now: int) -> int:
     """FPL keeps half of any profit (rounded down to 0.1m)."""

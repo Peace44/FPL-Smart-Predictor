@@ -176,9 +176,6 @@ class Account:
                 return {}
         raise AuthError(f"FPL refused the sign-in for {path} (HTTP {last.status_code})")
 
-    def me(self) -> dict:
-        return self._call("GET", "me/")
-
     def my_team(self) -> dict:
         """Picks with selling prices, bank, free transfers and chip status for the upcoming deadline."""
         return self._call("GET", f"my-team/{self.entry_id}/")

@@ -303,16 +303,3 @@ def _pair(v: _View, k: GWPlan) -> list[tuple[int, int]]:
         ins.remove(i)
         pairs.append((o, i))
     return pairs
-
-
-def summary(rec: Recommendation) -> str:
-    """Three lines for a terminal or notification."""
-    v, w = _View(rec), rec.plan.weeks[0]
-    if w.chip == "wildcard":
-        moves = f"{len(w.transfers_in)} changes"
-    elif w.chip == "freehit":
-        moves = "one-week squad"
-    else:
-        moves = "; ".join(f"{v.name(o)} → {v.name(i)}" for o, i in _pair(v, w))
-    return (f"GW{w.gw}: {moves or 'no transfers'} | captain {v.name(w.captain)} | "
-            f"chip {CHIP_NAMES.get(w.chip, 'none')} | {w.xp:.1f} xP")

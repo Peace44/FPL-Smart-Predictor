@@ -36,21 +36,12 @@ class Ratings:
     asof: pd.Timestamp | None = None
     extra: dict = field(default_factory=dict)
 
-    def lam(self, team: int, opp: int, home: bool) -> float:
-        """Expected goals scored by `team` against `opp`."""
-        return float(np.exp(self.c + (self.home if home else 0.0)
-                            + self.attack.get(team, 0.0) + self.weak.get(opp, 0.0)))
-
     def predict(self, team, opp, home) -> np.ndarray:
+        """Expected goals scored by each `team` against `opp`."""
         team, opp, home = np.asarray(team), np.asarray(opp), np.asarray(home, dtype=bool)
         a = np.array([self.attack.get(int(t), 0.0) for t in team])
         w = np.array([self.weak.get(int(o), 0.0) for o in opp])
         return np.exp(self.c + self.home * home + a + w)
-
-    def table(self) -> pd.DataFrame:
-        t = pd.DataFrame({"attack": self.attack, "weak": self.weak})
-        t["net"] = t["attack"] - t["weak"]
-        return t.sort_values("net", ascending=False)
 
 
 def fit(tm: pd.DataFrame, asof, teams: list[int] | None = None, season_start=None,
@@ -144,9 +135,3 @@ def walk_forward(tm: pd.DataFrame, seasons: list[str], p: TeamParams | None = No
                 dg.loc[has, "lam_a"] = b * dg.loc[has, "mkt_lam_a"] + (1 - b) * dg.loc[has, "rat_lam_a"]
             out.append(dg)
     return pd.concat(out).sort_index()
-
-
-def poisson_deviance(y, mu) -> float:
-    y, mu = np.asarray(y, float), np.asarray(mu, float)
-    t = np.where(y > 0, y * np.log(np.where(y > 0, y, 1) / mu), 0.0)
-    return float(2 * np.mean(t - (y - mu)))

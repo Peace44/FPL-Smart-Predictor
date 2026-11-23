@@ -91,7 +91,6 @@ def test_report_renders_every_section(market, opts, squad_state):
                     "## Chip timing", "## Your squad", "## Best projected players you do not own", "## Notes"):
         assert heading in text
     assert "nan" not in text.lower() and "None" not in text
-    assert report.summary(rec).startswith("GW1:")
 
 
 def test_season_replay_runs_and_keeps_the_rules(market):
