@@ -364,7 +364,7 @@ repeats it on every run until they are updated.
 
 ```bash
 .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest                       # about a minute, no network needed
+.venv/bin/python -m pytest                       # about 40 seconds, no network needed
 .venv/bin/python scripts/eval_minutes.py         # walk-forward check of the minutes model
 .venv/bin/fpl evaluate                           # walk-forward check of the points model
 .venv/bin/python scripts/tune_optimiser.py       # compare optimiser settings on past seasons
