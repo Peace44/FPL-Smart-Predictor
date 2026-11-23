@@ -497,10 +497,10 @@ def render(gw, path, data, f, avg, win, outcomes, adopted, change, dry_run, cert
         if o.baseline is not None and exp.kind == "xp":
             s = ev.summary(o.baseline)
             L += ["Current settings, season averages per gameweek:", "",
-                  gwreview._table(["Season", "MSE (likely starters)", "Bias", "Correlation", "Top 30 pts", "Top 10 pts"],
+                  gwreview.md_table(["Season", "MSE (likely starters)", "Bias", "Correlation", "Top 30 pts", "Top 10 pts"],
                                   [[i, f"{r.mse_rel:.3f}", f"{r.bias_rel:+.3f}", f"{r.corr_rel:.3f}", f"{r.top30:.2f}",
                                     f"{r.top10:.2f}"] for i, r in s.iterrows()]), ""]
-        L.append(gwreview._table(["Knob", "Tried", f"Δ {exp.primary} (better > 0)", "z", "z this season",
+        L.append(gwreview.md_table(["Knob", "Tried", f"Δ {exp.primary} (better > 0)", "z", "z this season",
                                   f"z {exp.guard}" if exp.guard else "guard", ""], _trial_rows(o)))
     L += ["", "## Result", ""]
     if adopted:
@@ -521,7 +521,7 @@ def render(gw, path, data, f, avg, win, outcomes, adopted, change, dry_run, cert
               "say where to look once more reviews are in.", "",
               "### Evidence: where the projections were wrong", "", evidence.summary(found)]
         if evidence.leads(found):
-            L += ["", gwreview._table(evidence.HEADERS, evidence.table(found))]
+            L += ["", gwreview.md_table(evidence.HEADERS, evidence.table(found))]
         L += ["", f"### Ideas for the limiting factor, {f}", ""]
         if cert:
             L += [gwreview.certainty_text(f, cert), ""]

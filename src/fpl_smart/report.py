@@ -4,16 +4,11 @@ from __future__ import annotations
 import pandas as pd
 
 from .config import CHIP_NAMES, POS
+from .gwreview import md_table
 from .planner import Recommendation
 from .solver import GWPlan, Plan
 
 STATUS = {"d": "doubtful", "i": "injured", "s": "suspended", "u": "unavailable", "n": "unavailable"}
-
-
-def _table(headers: list[str], rows: list[list]) -> str:
-    out = ["| " + " | ".join(headers) + " |", "|" + "|".join("---" for _ in headers) + "|"]
-    out += ["| " + " | ".join(str(c) for c in r) + " |" for r in rows]
-    return "\n".join(out)
 
 
 def _pct(x: float) -> str:
@@ -71,7 +66,7 @@ def _lineup_table(v: _View, w: GWPlan) -> str:
     for i, p in enumerate(w.bench):
         slot = "GK" if int(v.pl.at[p, "pos"]) == 1 else str(sum(1 for q in w.bench[:i] if int(v.pl.at[q, 'pos']) != 1) + 1)
         rows.append([f"bench {slot}", v.name(p), v.pl.at[p, "team"], v.fixture(p, w.gw), f"{v.x(p, w.gw):.1f}", v.flag(p)])
-    return _table(["", "Player", "Team", "Fixture", "xP", "Flag"], rows)
+    return md_table(["", "Player", "Team", "Fixture", "xP", "Flag"], rows)
 
 
 def _xp_rows(v: _View, ids, gws, label=None) -> list[list]:
@@ -152,7 +147,7 @@ def render(rec: Recommendation) -> str:
         add("")
         rows = _xp_rows(v, w.transfers_out, near, lambda p: "OUT " + v.name(p)) + \
             _xp_rows(v, w.transfers_in, near, lambda p: "IN " + v.name(p))
-        add(_table(["", "Team", "Pos", "Price"] + [f"GW{g}" for g in near] + ["Total"], rows))
+        add(md_table(["", "Team", "Pos", "Price"] + [f"GW{g}" for g in near] + ["Total"], rows))
         add("")
         flagged = [p for p in w.transfers_out if v.flag(p)]
         if flagged:
@@ -185,7 +180,7 @@ def render(rec: Recommendation) -> str:
             others = [(p, sh) for p, sh in rb.sold.items() if p not in w.transfers_out and sh >= 0.15][:5]
             rows += [["alternative sale: " + v.name(p), _pct(sh)] for p, sh in others]
             add("")
-            add(_table(["Move", "Share of runs"], rows))
+            add(md_table(["Move", "Share of runs"], rows))
             add("")
         else:
             add(f"- **No transfer:** {_pct(rb.n_transfers.get(0, 0.0))}")
@@ -207,7 +202,7 @@ def render(rec: Recommendation) -> str:
             moves = "; ".join(f"{v.name(o)} → {v.name(i)}" for o, i in _pair(v, k)) or "-"
         rows.append([f"GW{k.gw}", CHIP_NAMES.get(k.chip, "-"), moves + (f" (-{4 * k.hits})" if k.hits else ""),
                      v.name(k.captain), f"{k.xp:.1f}", f"£{k.bank / 10:.1f}m"])
-    add(_table(["GW", "Chip", "Transfers", "Captain", "xP", "Bank"], rows))
+    add(md_table(["GW", "Chip", "Transfers", "Captain", "xP", "Bank"], rows))
     add("")
 
     # ---------------------------------------------------------------- chips
@@ -230,7 +225,7 @@ def render(rec: Recommendation) -> str:
             rows.append([f"GW{c['wildcard']}" if "wildcard" in c else "-", f"GW{c['freehit']}" if "freehit" in c else "-",
                          f"GW{c['bboost']}" if "bboost" in c else "-", f"GW{c['3xc']}" if "3xc" in c else "-",
                          f"{p.total_xp:.0f}", f"{p.objective - best.objective:+.1f}", "recommended" if p is plan else ""])
-        add(_table(["Wildcard", "Free Hit", "Bench Boost", "Triple Captain", f"Points GW{gw}-{last}", "Score vs best", ""], rows))
+        add(md_table(["Wildcard", "Free Hit", "Bench Boost", "Triple Captain", f"Points GW{gw}-{last}", "Score vs best", ""], rows))
         add("")
         if plan is not best:
             add("The top-scoring option plays a Wildcard or Free Hit this week, but the recommended one is within "
@@ -246,7 +241,7 @@ def render(rec: Recommendation) -> str:
     add("")
     mine = sorted(st.squad, key=lambda p: (int(v.pl.at[p, "pos"]), -sum(v.x(p, g) for g in near)))
     rows = _xp_rows(v, mine, near, lambda p: v.name(p) + (" ⚑" if v.flag(p) else ""))
-    add(_table(["Player", "Team", "Pos", "Price"] + [f"GW{g}" for g in near] + ["Total"], rows))
+    add(md_table(["Player", "Team", "Pos", "Price"] + [f"GW{g}" for g in near] + ["Total"], rows))
     flags = [f"{v.name(p)}: {v.flag(p)}" for p in mine if v.flag(p)]
     if flags:
         add("")
@@ -259,7 +254,7 @@ def render(rec: Recommendation) -> str:
     for pos in (1, 2, 3, 4):
         ids = [p for p in tot[(v.pl["pos"] == pos) & ~v.pl.index.isin(st.squad)].nlargest(5).index]
         rows += _xp_rows(v, ids, near)
-    add(_table(["Player", "Team", "Pos", "Price"] + [f"GW{g}" for g in near] + ["Total"], rows))
+    add(md_table(["Player", "Team", "Pos", "Price"] + [f"GW{g}" for g in near] + ["Total"], rows))
     add("")
 
     # ---------------------------------------------------------------- notes

@@ -659,7 +659,7 @@ def _model_check(Pp: pd.DataFrame, L: pd.DataFrame, snap: pd.DataFrame, bs: dict
 
 
 # ----------------------------------------------------------------------------- rendering
-def _table(headers: list[str], rows: list[list]) -> str:
+def md_table(headers: list[str], rows: list[list]) -> str:
     out = ["| " + " | ".join(headers) + " |", "|" + "|".join("---" for _ in headers) + "|"]
     out += ["| " + " | ".join(str(c) for c in r) + " |" for r in rows]
     return "\n".join(out)
@@ -766,18 +766,18 @@ def _render_sections(rv: Review, c: dict) -> list[str]:
         rows.append([POS[pos[p]], name[p], role, f"{xp:.1f}" if xp is not None else "-",
                      f"{pp:.0%}" if pp is not None else "-", int(c["mins"].get(p, 0)), a,
                      _signed(a - xp) if xp is not None else "-", _what_happened(p, L, pos, c["pending"])])
-    sec.append(_table(["Pos", "Player", "Role", "Projected", "P(plays)", "Mins", "Points", "Diff", "What happened"], rows))
+    sec.append(md_table(["Pos", "Player", "Role", "Projected", "P(plays)", "Mins", "Points", "Diff", "What happened"], rows))
     sec.append("")
     sec.append("Points are before the armband; the captain's are doubled in the totals below.")
     if proj:
         sec += ["", f"The eleven as picked (captain counted twice) were projected **{proj['xi_projected']:.1f}** and "
                     f"scored **{proj['xi_actual']:.0f}**. Where the difference came from:", ""]
         g = proj["gap"]
-        sec.append(_table(["Source", "Points"], [[k, _signed(v)] for k, v in g.items() if abs(v) >= 0.05]
+        sec.append(md_table(["Source", "Points"], [[k, _signed(v)] for k, v in g.items() if abs(v) >= 0.05]
                           + [["**Total**", f"**{_signed(proj['xi_actual'] - proj['xi_projected'])}**"]]))
         at = proj["attack"]
         sec += ["", "Luck or model? The eleven's goals and assists (captain counted twice):", "",
-                _table(["", "Projected", "Chances they got", "Actual"],
+                md_table(["", "Projected", "Chances they got", "Actual"],
                        [["Goals", f"{at['goals']['projected']:.2f}", f"{at['goals']['chances (xG)']:.2f} xG", f"{at['goals']['scored']:.0f}"],
                         ["Assists", f"{at['assists']['projected']:.2f}", f"{at['assists']['chances (xA)']:.2f} xA", f"{at['assists']['made']:.0f}"]]),
                 "", "A projection close to the chances but far from the actual is finishing luck; a projection far "
@@ -810,12 +810,12 @@ def _render_sections(rv: Review, c: dict) -> list[str]:
                    f"scored {m['mean_actual']:.2f} (bias {_signed(m['bias'], 2)}); correlation with actual points "
                    f"**{m['corr']:.2f}**" + (f", FPL's own projection on the same players {m['fpl_corr']:.2f} "
                                               f"(ours {m['corr_same']:.2f})." if m.get("fpl_corr") is not None else "."))
-        sec += ["", _table(["Position", "Players", "Projected", "Actual", "Correlation"],
+        sec += ["", md_table(["Position", "Players", "Projected", "Actual", "Correlation"],
                            [[k, v["n"], f"{v['projected']:.2f}", f"{v['actual']:.2f}",
                              f"{v['corr']:.2f}" if v["corr"] is not None else "-"] for k, v in m["by_pos"].items()])]
         comp_rows = [[COMP_LABEL[k], f"{v['projected']:.0f}", f"{v['actual']:.0f}", _signed(v["actual"] - v["projected"], 0)]
                      for k, v in m["components"].items() if abs(v["projected"]) + abs(v["actual"]) >= 1]
-        sec += ["", "Points by component, all players:", "", _table(["Component", "Projected", "Actual", "Diff"], comp_rows)]
+        sec += ["", "Points by component, all players:", "", md_table(["Component", "Projected", "Actual", "Diff"], comp_rows)]
         a = m["attack"]
         sec += ["", f"Goals: projected {a['x_goals']:.0f}, chances worth {a['xg']:.0f} xG, scored {a['goals']:.0f}. "
                     f"Assists: projected {a['x_assists']:.0f}, {a['xa']:.0f} xA, made {a['assists']:.0f}."]
@@ -826,7 +826,7 @@ def _render_sections(rv: Review, c: dict) -> list[str]:
                         f"{tg['mae_xg']:.2f} a team on average (bias {_signed(tg['bias_xg'], 2)}). Furthest out: {worst}."]
         mc = m["minutes_calibration"]
         sec += ["", "Minutes: how often players played, by the chance the model gave them:", "",
-                _table(["P(plays)", "Players", "Predicted", "Played"],
+                md_table(["P(plays)", "Players", "Predicted", "Played"],
                        [[r["bin"], r["n"], f"{r['predicted']:.0%}", f"{r['actual']:.0%}"] for r in mc])]
         if m["nailed_missed"]:
             sec += ["", f"Regulars (85%+) who did not play: {len(m['nailed_missed'])} of {m['nailed_n']}: "
@@ -854,7 +854,7 @@ def _render_sections(rv: Review, c: dict) -> list[str]:
             rows.append([lab, th[k]["total"], f"{th[k]['total'] / gw:.1f}", th[k]["event_total"],
                          gap if gap > 0 else f"ahead by {-gap}", f"{gap / left:.1f}" if gap > 0 and left else "-"])
         rows.append(["**You**", S["total_points"], f"{S['total_points'] / gw:.1f}", S["net"], "", ""])
-        sec.append(_table(["", "Points", "Per GW", f"GW{gw}", "Gap", f"Needed per GW ({left} left)"], rows))
+        sec.append(md_table(["", "Points", "Per GW", f"GW{gw}", "Gap", f"Needed per GW ({left} left)"], rows))
         prev_th = (next((r for r in reversed(c["reviews"]) if r.get("thresholds")), None) or {}).get("thresholds", {})
         prev_r = next((r for r in reversed(c["reviews"]) if r.get("thresholds")), None)
         if prev_th and prev_r:
@@ -881,13 +881,13 @@ def _render_sections(rv: Review, c: dict) -> list[str]:
                           f"{_fmt_rank(o)} {arrow}".strip()])
             prev_or = o or prev_or
         sec += ["", "<details><summary>Season so far</summary>", "",
-                _table(["GW", "Points", "Average", "GW rank", "Overall rank"], trows), "", "</details>"]
+                md_table(["GW", "Points", "Average", "GW rank", "Overall rank"], trows), "", "</details>"]
         sec += ["", "Milestones:", ""] + [f"- {x}" for x in _milestones(hist, gw, c["reviews"], D)]
     if D.get("elite"):
         e = D["elite"]
         dfc = D["deficits"]
         sec += ["", f"Against the top {e['n']} ({e['source']}):", "",
-                _table(["Part", "You", f"Top {e['n']} average", "Behind by"],
+                md_table(["Part", "You", f"Top {e['n']} average", "Behind by"],
                        [["Squad: best possible eleven", f"{T['best_xi']:.0f}", f"{e['avg']['best_xi']:.1f}", f"{dfc['squad']:.1f}"],
                         ["Selection: left on the bench", f"{T['selection']:.0f}", f"{e['avg']['selection']:.1f}", f"{dfc['selection']:.1f}"],
                         ["Captaincy: armband", f"{T['captain_extra']:.0f}", f"{e['avg']['captain_extra']:.1f}", f"{dfc['captaincy']:.1f}"],
@@ -921,7 +921,7 @@ def _render_sections(rv: Review, c: dict) -> list[str]:
                 for f in FACTORS]
         sec += [f"Points behind the top {D['elite']['n']} by part (positive = behind), this week and averaged over the "
                 f"last {n} engine-managed gameweek{'s' if n != 1 else ''} ({', '.join(f'GW{g}' for g in win['gws']) or 'none'}):", "",
-                _table(["Part", f"GW{gw}", "Average ± s.e.", "What moves it"], rows), ""]
+                md_table(["Part", f"GW{gw}", "Average ± s.e.", "What moves it"], rows), ""]
     f = D["limiting_factor"]
     if f:
         settled = cert.get("settled", False)
@@ -935,7 +935,7 @@ def _render_sections(rv: Review, c: dict) -> list[str]:
     found = evidence.pool(c["reviews"] + [D])
     sec += ["Where the projections were wrong, pooled over the season's reviews:", "", evidence.summary(found)]
     if evidence.leads(found):
-        sec += ["", _table(evidence.HEADERS, evidence.table(found, 5))]
+        sec += ["", md_table(evidence.HEADERS, evidence.table(found, 5))]
     sec.append("")
     obs = _observations(D, c)
     if obs:
