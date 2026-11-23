@@ -33,9 +33,7 @@ import pandas as pd
 
 from . import account as acc
 from . import execute, fpl_api, notify
-from .config import REPORTS, team_id
-
-CHIP_NAMES = execute.CHIP_NAMES
+from .config import CHIP_NAMES, REPORTS, team_id
 
 
 def _env_num(key: str, default: float) -> float:

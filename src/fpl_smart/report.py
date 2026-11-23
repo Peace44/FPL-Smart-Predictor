@@ -3,11 +3,10 @@ from __future__ import annotations
 
 import pandas as pd
 
-from .config import POS
+from .config import CHIP_NAMES, POS
 from .planner import Recommendation
 from .solver import GWPlan, Plan
 
-CHIP_NAMES = {"wildcard": "Wildcard", "freehit": "Free Hit", "bboost": "Bench Boost", "3xc": "Triple Captain"}
 STATUS = {"d": "doubtful", "i": "injured", "s": "suspended", "u": "unavailable", "n": "unavailable"}
 
 

@@ -35,7 +35,7 @@ import pandas as pd
 from scipy import stats
 
 from . import evidence, fpl_api
-from .config import POS, REPORTS, team_id
+from .config import CHIP_NAMES, POS, REPORTS, team_id
 from .scoring import MIN_FORMATION, score_gw
 
 VERSION = 1
@@ -55,7 +55,6 @@ IDENT = {"minutes": "app", "goals_scored": "goals", "assists": "assists", "clean
          "goals_conceded": "gc", "saves": "saves", "penalties_saved": "pensave", "defensive_contribution": "defcon",
          "bonus": "bonus", "yellow_cards": "cards", "red_cards": "cards", "own_goals": "cards",
          "penalties_missed": "cards"}
-CHIP_NAMES = {"wildcard": "Wildcard", "freehit": "Free Hit", "bboost": "Bench Boost", "3xc": "Triple Captain"}
 FACTOR_TEXT = {
     "squad": "who you own: the best eleven the squad could field",
     "selection": "who starts: points left on the bench beyond what the best eleven needed",

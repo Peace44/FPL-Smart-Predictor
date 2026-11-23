@@ -21,12 +21,11 @@ from dataclasses import asdict, dataclass, field
 import pandas as pd
 
 from . import account as acc
-from .config import REPORTS
+from .config import CHIP_NAMES, REPORTS
 from .planner import Recommendation
 from .solver import MAX_PLAY, MIN_PLAY, SQUAD, GWPlan
 
 MIN_MINUTES = 10          # never start writing this close to the deadline
-CHIP_NAMES = {"wildcard": "Wildcard", "freehit": "Free Hit", "bboost": "Bench Boost", "3xc": "Triple Captain"}
 
 
 class Refused(RuntimeError):

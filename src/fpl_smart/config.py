@@ -14,6 +14,7 @@ PAST_SEASONS = ["2022-23", "2023-24", "2024-25", "2025-26"]
 CURRENT_SEASON = "2026-27"
 
 POS = {1: "GKP", 2: "DEF", 3: "MID", 4: "FWD"}
+CHIP_NAMES = {"wildcard": "Wildcard", "freehit": "Free Hit", "bboost": "Bench Boost", "3xc": "Triple Captain"}
 
 
 def _load_env() -> None:
