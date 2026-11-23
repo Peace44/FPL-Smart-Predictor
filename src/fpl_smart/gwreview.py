@@ -36,6 +36,7 @@ from scipy import stats
 
 from . import evidence, fpl_api
 from .config import CHIP_NAMES, POS, REPORTS, team_id
+from .player_model import COMPONENTS
 from .scoring import MIN_FORMATION, score_gw
 
 VERSION = 1
@@ -46,7 +47,6 @@ OVERALL_LEAGUE = 314
 THRESHOLD_RANKS = (1, 100, 1_000, 10_000, 100_000, 1_000_000)
 RANK_BANDS = (10_000_000, 5_000_000, 2_000_000, 1_000_000, 500_000, 250_000, 100_000, 50_000, 10_000,
               1_000, 100, 10, 1)
-COMPONENTS = ["app", "goals", "assists", "cs", "gc", "saves", "pensave", "defcon", "bonus", "cards"]
 COMP_LABEL = {"app": "Appearance", "goals": "Goals", "assists": "Assists", "cs": "Clean sheets",
               "gc": "Goals conceded", "saves": "Saves", "pensave": "Penalty saves",
               "defcon": "Defensive contributions", "bonus": "Bonus", "cards": "Cards, own goals, missed pens",

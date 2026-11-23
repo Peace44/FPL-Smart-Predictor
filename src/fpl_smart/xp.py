@@ -18,8 +18,6 @@ from . import player_model as PM
 from . import team_model as TM
 from .config import CURRENT_SEASON, PROCESSED
 
-COMPONENTS = ["app", "goals", "assists", "cs", "gc", "saves", "pensave", "defcon", "bonus", "cards"]
-
 
 @dataclass
 class Projection:

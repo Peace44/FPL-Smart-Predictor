@@ -20,6 +20,8 @@ from . import history
 LN2 = np.log(2.0)
 T0 = pd.Timestamp("2022-07-01", tz="UTC")
 PRICE_EDGES = np.array([0, 42, 47, 52, 57, 62, 67, 72, 77, 85, 95, 110, 130, 999])
+# the parts of expected points; they sum to xp
+COMPONENTS = ["app", "goals", "assists", "cs", "gc", "saves", "pensave", "defcon", "bonus", "cards"]
 
 # stat -> (numerator column, exposure column)
 STATS = {
@@ -302,8 +304,7 @@ def expected_points(R: pd.DataFrame, pos, lam, lam_a, p_play, p60, emin, cal: Ca
     out["bonus"] = np.clip(bon, 0, 3) * sc["bonus"]
     out["cards"] = (sc["yellow_cards"] * R["yc90"].to_numpy() + sc["red_cards"] * fl("rc")
                     + sc["own_goals"] * fl("og") + sc["penalties_missed"] * fl("pm")) * e90
-    comps = ["app", "goals", "assists", "cs", "gc", "saves", "pensave", "defcon", "bonus", "cards"]
-    out["xp"] = out[comps].sum(axis=1)
+    out["xp"] = out[COMPONENTS].sum(axis=1)
     return out
 
 
