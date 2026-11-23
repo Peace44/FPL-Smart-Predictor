@@ -29,7 +29,6 @@ from .scoring import score_gw
 from .solver import SolverOptions, solve
 
 STRATEGIES = ("plan", "myopic", "hold")
-RECAL_EVERY = 1        # refit the calibration constants every gameweek (about a second)
 
 
 @dataclass
@@ -97,12 +96,11 @@ def project_season(season: str, horizon: int = 8, first_gw: int = 1, last_gw: in
     defcon = bool(cur["has_defcon"].any())
 
     out: dict[int, GWData] = {}
-    cal, msg = None, None
     gws = sorted(int(g) for g in cur["gw"].unique())
     for g in gws:
         when = cur.loc[cur["gw"] == g, "kickoff"].min()
-        if cal is None or (g - gws[0]) % RECAL_EVERY == 0:
-            cal, msg = PM.fit_calibration(ms, (ms["kickoff"] < when).to_numpy(), params)
+        # refit the calibration constants every gameweek (about a second)
+        cal, msg = PM.fit_calibration(ms, (ms["kickoff"] < when).to_numpy(), params)
         # who is in the game, and at what price, at this deadline
         snap = cur[cur["gw"] <= g].groupby("code").tail(1).set_index("code")
         players = pd.DataFrame({"code": snap.index, "pos": snap["pos"], "team_code": snap["team_code"],
