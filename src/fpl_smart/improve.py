@@ -1,5 +1,5 @@
-"""Self-improvement: read a finished gameweek review, find its limiting factor, and test changes to
-the settings behind that factor on past seasons. A change is kept only when it is clearly better.
+"""Self-improvement: read a finished gameweek review and test one-step changes to every setting on
+past seasons. A change is kept only when it is clearly better.
 
     fpl improve                         the latest final review
     fpl improve reports/gw12_review.md  a given review
@@ -8,21 +8,21 @@ the settings behind that factor on past seasons. A change is kept only when it i
                                         deadline is close
     fpl improve --revert 3              undo change #3 (tuning/params.json history)
 
-The review picks the target (which factor costs the most points against the top 50); the test
-decides whether to act. One week of points is mostly luck, so the review only chooses where to
-look: every candidate is judged on thousands of player-matches from earlier seasons and this one,
+The review names the limiting factor (which part costs the most points against the top 50), but it
+no longer chooses the settings tested: a few weeks rarely settle it, and the machine is idle for
+days, so every experiment runs each week until one keeps a change. One week of points is mostly
+luck: every candidate is judged on thousands of player-matches from earlier seasons and this one,
 gameweek by gameweek, against the settings in effect. At most one knob moves per run, by one step
-and within hard bounds (tuning.KNOBS), and only when it beats the current value by three standard
+and within hard bounds (tuning.KNOBS), and only when it beats the current value by Z_ADOPT standard
 errors without making the guard metric or the current season clearly worse. Over the weeks that
-is coordinate descent on whatever the reviews keep finding limiting.
+is coordinate descent on every setting.
 
-When no setting passes, or none covers the factor, the limit is likely in the code: the run writes a
+When no setting passes, the limit is likely in the code: the run writes a
 brief for a code change (`reports/gwNN_improvement.md`) that the `fpl-improve` skill works from. The
 brief is aimed by evidence first: the model's errors pooled over every review, with standard errors
 (`evidence.py`). The factor's own ideas follow, marked settled or not (`gwreview.certainty`): a few
 weeks of team results rarely tell the parts apart, so an unsettled factor does not aim a change. The Discord
-report says which of the reasons it was (no setting covers the factor, none passed, a test could
-not run) and names the skill. A scheduled run that fails is reported too, once per gameweek and
+report says which of the reasons it was (none passed, or a test could not run) and names the skill. A scheduled run that fails is reported too, once per gameweek and
 kind of error, and a gameweek that no run worked on is named in the next run's report.
 """
 from __future__ import annotations
@@ -41,7 +41,10 @@ from . import evidence, fpl_api, gwreview, tuning
 from .autopilot import Settings, _report
 from .config import REPORTS
 
-Z_ADOPT = 3.0          # many candidates are tried each run; 3 s.e. keeps false adoptions rare
+# Every experiment runs each week: 39 candidate settings, 63 comparisons (top_end judges its 24 on its
+# own measure as well). At 3.2 s.e. the chance that one of them passes by luck alone is about 4% a run
+# (3.0 was right for the 35 at most that one factor's experiments had).
+Z_ADOPT = 3.2
 Z_GUARD = -1.0         # the guard metric and the current season may not get clearly worse
 # Smallest improvement worth a change, per gameweek. Paired comparisons can show a difference far too
 # small to matter as "significant"; these are about a 0.0015 gain in correlation for the points model
@@ -82,14 +85,6 @@ EXPERIMENTS = {
                                "live deadline"),
     "planning": Experiment("planning", [k for k in tuning.KNOBS if k.startswith("solver.")], "points", None, "planning",
                            "points scored by the optimiser replayed over last season and this one"),
-}
-PLAN = {
-    "squad": ["points_model", "planning"],
-    "selection": ["points_model", "availability"],
-    "captaincy": ["top_end"],
-    "hits": ["planning"],
-    "chips": [],
-    "operations": [],
 }
 STRUCTURAL = {
     "squad": [
@@ -173,20 +168,24 @@ def _candidates(knobs: list[str]) -> list[Trial]:
     return out
 
 
-def run_xp(exp: Experiment, b: ev.Base, log) -> Outcome:
-    o = Outcome(exp.name)
+def run_xp(exps: list[Experiment], b: ev.Base, log) -> list[Outcome]:
+    """The points-model experiments share their projections: each candidate setting is projected once
+    and compared on the measures of every experiment whose knobs include it."""
     t0 = time.time()
-    log(f"{exp.name}: baseline ...")
-    o.baseline = base = ev.points_model(b)
-    for i, t in enumerate(_candidates(exp.knobs), 1):
-        section, name = t.knob.split(".", 1)
-        log(f"{exp.name}: {i} {t.knob} {t.old:g} -> {t.new:g}")
-        df = ev.points_model(b, **{section: {name: t.new}})
-        t.primary = ev.compare(base, df, exp.primary)
-        t.guard = ev.compare(base, df, exp.guard) if exp.guard else None
-        o.trials.append(t)
-    o.seconds = time.time() - t0
-    return o
+    log("points model: baseline ...")
+    base = ev.points_model(b)
+    outs = [Outcome(e.name, baseline=base) for e in exps]
+    knobs = list(dict.fromkeys(k for e in exps for k in e.knobs))
+    for i, c in enumerate(_candidates(knobs), 1):
+        section, name = c.knob.split(".", 1)
+        log(f"points model: {i} {c.knob} {c.old:g} -> {c.new:g}")
+        df = ev.points_model(b, **{section: {name: c.new}})
+        for e, o in zip(exps, outs):
+            if c.knob in e.knobs:
+                o.trials.append(Trial(c.knob, c.old, c.new, ev.compare(base, df, e.primary),
+                                      ev.compare(base, df, e.guard) if e.guard else None))
+    outs[0].seconds = time.time() - t0          # one shared pass: its time is shown once
+    return outs
 
 
 def run_availability(exp: Experiment, log) -> Outcome:
@@ -299,10 +298,8 @@ def _closest(outcomes: list[Outcome]) -> str:
 
 
 def unchanged(f: str, outcomes: list[Outcome]) -> str:
-    """Why no setting changed. Only when every test for the factor ran is the limit known to be in the code."""
-    if not outcomes:
-        return f"No setting covers {f}, so only a code change can move it."
-    ran = [o for o in outcomes if not o.skipped]
+    """Why no setting changed. Only when every test ran is the limit known to be in the code."""
+    ran =[o for o in outcomes if not o.skipped]
     skipped = "; ".join(f"{o.experiment}: {o.skipped.rstrip('.')}" for o in outcomes if o.skipped)
     if not ran:
         return f"No test could run ({skipped}), so it is not known whether a setting would help."
@@ -403,32 +400,31 @@ def _run(path: Path, dry_run: bool, factor: str | None, heavy: bool, budget_min:
     log(f"GW{gw}: limiting factor {f}" + (f" (average {avg[f]:+.1f} behind the top 50 over {len(win)} GW)" if f in avg else "")
         + ("" if cert["settled"] else ", not settled"))
 
-    order = list(PLAN.get(f, []))
-    if f == "selection" and (data.get("projection") or {}).get("minutes_loss", 0) > 2:
-        order = ["availability", "points_model"]
+    # Every experiment runs, whatever the factor, in this order until one keeps a change (at most one
+    # setting moves per run). points_model and top_end share one set of projections.
     outcomes: list[Outcome] = []
     adopted: Trial | None = None
-    b = None
     t_start = time.time()
-    for name in order:
-        exp = EXPERIMENTS[name]
+    xp_exps = [e for e in EXPERIMENTS.values() if e.kind == "xp"]
+    for group in [xp_exps] + [[e] for e in EXPERIMENTS.values() if e.kind != "xp"]:
+        exp = group[0]
         if exp.kind == "planning" and not heavy:
-            outcomes.append(Outcome(name, skipped="heavy replay skipped (--light)"))
+            outcomes.append(Outcome(exp.name, skipped="heavy replay skipped (--light)"))
             continue
         if exp.kind == "planning" and (time.time() - t_start) / 60 > budget_min:
-            outcomes.append(Outcome(name, skipped="time budget used up"))
+            outcomes.append(Outcome(exp.name, skipped="time budget used up"))
             continue
         if exp.kind == "xp":
-            b = b or ev.base(refresh=True, log=log)
-            o = run_xp(exp, b, log)
+            done = run_xp(group, ev.base(refresh=True, log=log), log)
         elif exp.kind == "availability":
-            o = run_availability(exp, log)
+            done = [run_availability(exp, log)]
         else:
-            o = run_planning(exp, log, budget_min)
-        passing = sorted([t for t in o.trials if t.passes], key=lambda t: -t.primary.z)
-        if passing:
-            o.adopted = adopted = passing[0]
-        outcomes.append(o)
+            done = [run_planning(exp, log, budget_min)]
+        for o in done:
+            passing = sorted([t for t in o.trials if t.passes], key=lambda t: -t.primary.z)
+            if passing and adopted is None:
+                o.adopted = adopted = passing[0]
+            outcomes.append(o)
         if adopted:
             break
 

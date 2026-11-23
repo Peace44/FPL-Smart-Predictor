@@ -24,7 +24,7 @@ for attempt in $(seq 1 "$tries"); do
   fi
 done
 # With FPL_SELF_IMPROVE=on: after a gameweek's review is final, and while no deadline is close, test
-# changes to the settings behind its limiting factor (fpl improve). It runs inside the lock, so no
+# one-step changes to every setting (fpl improve). It runs inside the lock, so no
 # plan runs meanwhile, and reports its own result or failure to Discord. Off by default until
 # `fpl improve` has had three clean manual runs.
 if [ "${FPL_SELF_IMPROVE:-off}" = "on" ]; then

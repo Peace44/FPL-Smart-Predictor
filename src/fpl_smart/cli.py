@@ -6,7 +6,7 @@
     fpl player      one player's projection, broken into components
     fpl backtest    replay the optimiser over a past season
     fpl review      the gameweek review: projection vs result, progress to first place, what to improve
-    fpl improve     read the latest review and test changes to the setting behind its limiting factor
+    fpl improve     read the latest final review and test one-step changes to every setting
     fpl evaluate    walk-forward accuracy of the points model (compare code versions with --save/--against)
     fpl auto        unattended mode: plan near a deadline and, if allowed, act on the account
     fpl apply       plan now and carry it out on the account (--dry-run shows the requests only)
@@ -275,7 +275,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--print", action="store_true", help="also print the review")
     p.set_defaults(fn=cmd_review)
 
-    p = sub.add_parser("improve", help="read the latest final review and test changes to its limiting factor")
+    p = sub.add_parser("improve", help="read the latest final review and test one-step changes to every setting")
     p.add_argument("review", nargs="?", help="review file (default: the latest final one)")
     p.add_argument("--dry-run", action="store_true", help="test and report, change nothing")
     p.add_argument("--factor", choices=["squad", "selection", "captaincy", "chips", "hits", "operations"],

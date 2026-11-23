@@ -186,14 +186,51 @@ def test_compare_direction_and_adoption():
     assert not improve.Trial("player.k_goal", 8.0, 5.7, c, ev.compare(base, worse_guard, "top30")).passes
 
 
-def test_every_factor_has_a_plan_and_ideas():
+def test_every_factor_has_ideas_and_every_experiment_is_valid():
     for f in gwreview.FACTORS + ("operations",):
-        assert f in improve.PLAN and improve.STRUCTURAL[f]
-        assert all(e in improve.EXPERIMENTS for e in improve.PLAN[f])
+        assert improve.STRUCTURAL[f]
     for e in improve.EXPERIMENTS.values():
         assert all(k in tuning.KNOBS for k in e.knobs)
         assert e.primary in ev.METRICS and (e.guard is None or e.guard in ev.METRICS)
-    assert json.dumps(gwreview.LEVERS) and set(gwreview.LEVERS) == set(improve.PLAN)
+    assert json.dumps(gwreview.LEVERS) and set(gwreview.LEVERS) == set(improve.STRUCTURAL)
+
+
+def test_every_experiment_runs_whatever_the_factor(tuned, tmp_path, monkeypatch):
+    review = tmp_path / "gw11_review.md"
+    review.write_text("")
+    monkeypatch.setattr(gwreview, "parse", lambda text: {"gw": 11, "final": True})
+    monkeypatch.setattr(gwreview, "load_reviews", lambda: [])
+    monkeypatch.setattr(gwreview, "certainty", lambda win, f: {"settled": False})
+    monkeypatch.setattr(gwreview, "certainty_text", lambda f, cert: "")
+    monkeypatch.setattr(improve.evidence, "pool", lambda reviews: [])
+    rng = np.random.default_rng(2)
+    base = pd.DataFrame({m: 5 + rng.normal(0, 0.1, 20) for m in ev.METRICS if m not in ("logloss", "points")},
+                        index=pd.MultiIndex.from_tuples([("2026-27", g) for g in range(1, 21)]))
+    calls = []
+
+    def points_model(b, player=None, team=None):      # every candidate clearly worse: nothing is kept
+        calls.append(player or team)
+        noise = rng.normal(0, 0.01, len(base))
+        return base if not (player or team) else base.assign(
+            mse_rel=base["mse_rel"] + 0.1 + noise, top30=base["top30"] - 0.1 + noise, top10=base["top10"] - 0.1 + noise)
+    monkeypatch.setattr(improve.ev, "base", lambda **k: None)
+    monkeypatch.setattr(improve.ev, "points_model", points_model)
+    monkeypatch.setattr(improve.ev, "availability_rows", lambda: pd.DataFrame({"gw": []}))
+    seen, real_render = {}, improve.render
+
+    def render(*a, **k):
+        seen["outcomes"] = a[6]
+        return real_render(*a, **k)
+    monkeypatch.setattr(improve, "render", render)
+    assert improve.run(str(review), dry_run=True, factor="chips", heavy=False, log=lambda *_: None) == 0
+    outs = {o.experiment: o for o in seen["outcomes"]}
+    assert list(outs) == ["points_model", "top_end", "availability", "planning"]   # chips used to run none
+    assert len(calls) == 1 + len(outs["points_model"].trials)                       # one projection per candidate
+    te = outs["top_end"].trials
+    assert te and {t.knob for t in te} <= set(improve.EXPERIMENTS["top_end"].knobs)
+    assert all(t.primary.metric == "top10" and t.guard.metric == "mse_rel" for t in te)
+    assert outs["availability"].skipped and outs["planning"].skipped == "heavy replay skipped (--light)"
+    assert not any(o.adopted for o in outs.values())
 
 
 @pytest.mark.parametrize("plan_within_h,hours_left,runs", [
@@ -217,7 +254,6 @@ def _trial(z, knob="player.k_goal"):
 
 
 @pytest.mark.parametrize("outcomes,says,not_says", [
-    ([], "No setting covers chips", "limit is in the code"),
     ([improve.Outcome("points_model", [_trial(1.2)])], "the limit is in the code", "Not run"),
     ([improve.Outcome("points_model", [_trial(1.2)]), improve.Outcome("availability", skipped="needs 3; has 1")],
      "Not run: availability: needs 3; has 1", "the limit is in the code"),

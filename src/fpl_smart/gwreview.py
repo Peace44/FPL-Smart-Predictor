@@ -934,8 +934,8 @@ def _render_sections(rv: Review, c: dict) -> list[str]:
     if D["operations"]["incidents"]:
         sec += ["Autopilot incidents this gameweek:", ""] + [f"- {x}" for x in D["operations"]["incidents"]]
         sec += ["", f"Points they cost in the end: {D['operations']['points_lost']:.0f}.", ""]
-    sec.append("Next step: `fpl improve` reads this review, tests changes to the settings behind the limiting "
-               "factor on past seasons and keeps one only if it is clearly better; if none is, it writes a brief for a "
+    sec.append("Next step: `fpl improve` tests one-step changes to every setting on past "
+               "seasons and keeps one only if it is clearly better; if none is, it writes a brief for a "
                f"code change (`reports/gw{gw:02d}_improvement.md`).")
     from . import tuning
     hist_t = tuning.history()

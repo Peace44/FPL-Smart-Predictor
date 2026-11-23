@@ -1,6 +1,6 @@
 ---
 name: fpl-improve
-description: Weekly self-improvement loop for FPL Smart Predictor. Reads the latest finished gameweek review (reports/gwNN_review.md), runs `fpl improve` to test settings behind the review's limiting factor, and when no setting helps, implements and validates a code change aimed at that factor on a branch. Use when the user asks to improve the predictor from a review, to address the limiting factor, to act on a gameweek review, or runs /fpl-improve.
+description: Weekly self-improvement loop for FPL Smart Predictor. Reads the latest finished gameweek review (reports/gwNN_review.md), runs `fpl improve` to test every setting, and when no setting helps, implements and validates a code change aimed at that factor on a branch. Use when the user asks to improve the predictor from a review, to address the limiting factor, to act on a gameweek review, or runs /fpl-improve.
 ---
 
 # FPL self-improvement loop
@@ -24,8 +24,8 @@ before keeping it. Work from evidence, one change at a time.
 
 - If `reports/gwNN_improvement.md` already exists for this review (with `FPL_SELF_IMPROVE=on` the
   scheduler runs `fpl improve --if-due` on its own), read it. Otherwise run
-  `.venv/bin/fpl improve <review>`. It takes 5 to 10 minutes, or about 30 if it replays the
-  optimiser; use `--light` to skip that replay.
+  `.venv/bin/fpl improve <review>`. It tests every setting: 5 to 10 minutes for the points model
+  and availability, then about 30 for the optimiser replay; use `--light` to skip that replay.
 - If it changed a setting: report the knob, old and new values, and the evidence (z-scores). Run
   `.venv/bin/python -m pytest -q`. Offer to commit `tuning/params.json` and `tuning/ledger.md`.
   Then stop: one change per review.
@@ -79,7 +79,7 @@ The loop is only as good as what the review measures. If the user's notes or you
 a failure the review did not show (e.g. a hit taken for a player who was already injured, or a
 captain picked against 90% of the top 50 every week), extend `src/fpl_smart/gwreview.py` so every
 future review measures it. Add an observation, a field in the embedded data, or a new factor with
-its `LEVERS` and `improve.PLAN`/`STRUCTURAL` entries. Add a test in `tests/test_review.py`. A new
+its `LEVERS` and `improve.STRUCTURAL` entries. Add a test in `tests/test_review.py`. A new
 factor must keep the parts adding up to the gap with the top 50, or be reported beside them.
 
 ## Ground rules

@@ -34,7 +34,7 @@ Without an odds key the tool still works, using its own team ratings for every f
 | `fpl top --pos MID -n 20` | Best projected players (`--max-price`, `--team`, `--value`) |
 | `fpl player Haaland` | One player's projection per fixture, split into goals, assists, clean sheets, bonus... |
 | `fpl review` | The gameweek review in `reports/gwNN_review.md`: result against projection, progress towards first place, the limiting factor (`--gw N`) |
-| `fpl improve` | Read the latest final review and test changes to the settings behind its limiting factor; keep one only if it is clearly better (`--dry-run`, `--revert ID`) |
+| `fpl improve` | Read the latest final review and test one-step changes to every setting; keep one only if it is clearly better (`--dry-run`, `--revert ID`) |
 | `fpl evaluate` | Walk-forward accuracy of the points model; `--save NAME` / `--against NAME` compare two versions of the code |
 | `fpl backtest --season 2025-26` | Replay the optimiser over a finished season |
 | `fpl auto` | Unattended mode: plan when a deadline is near and, if allowed, update your team (for a scheduler) |
@@ -156,24 +156,27 @@ before FPL has checked the data is marked provisional and is rewritten later. It
 - **Your notes:** anything you write under that heading is kept when the review is rewritten, and
   the self-improvement skill reads it.
 
-**`fpl improve`** takes the latest final review and works on its limiting factor. One week of
-points is mostly luck, so the review only chooses where to look. Each candidate setting is one step
-up or down for one knob in `tuning.KNOBS` (player and team ratings, availability, optimiser). It is
-replayed walk-forward over the last two seasons and this one, gameweek by gameweek, against the
-settings in effect. A setting is kept only if it beats the current value by three standard errors
-without the guard measure or the current season getting worse. At most one setting changes per run.
-Kept values go to `tuning/params.json`, the live code reads them from there, and `tuning/ledger.md`
-records every run. `fpl improve --revert ID` undoes a change. The experiments behind each factor:
+**`fpl improve`** takes the latest final review and tests every setting, whatever the review's
+limiting factor: a few weeks rarely settle the factor, and the machine is idle for days each week.
+Each candidate setting is one step up or down for one knob in `tuning.KNOBS` (player and team
+ratings, availability, optimiser), 39 in all. It is replayed walk-forward over the last two seasons
+and this one, gameweek by gameweek, against the settings in effect. A setting is kept only if it
+beats the current value by 3.2 standard errors (with 63 comparisons, since the top end judges 24 of
+them on its own measure too, that keeps the chance of keeping one by luck near 4% a run) without the
+guard measure or the current season getting worse. At most
+one setting changes per run. Kept values go to `tuning/params.json`, the live code reads them from
+there, and `tuning/ledger.md` records every run. `fpl improve --revert ID` undoes a change. The
+experiments, in the order they run (the first to keep a change ends the run):
 
-| Factor | Tested first | Then |
+| Experiment | Measures | Guarded by |
 |---|---|---|
-| squad | points model: accuracy of every likely starter | optimiser replay (about 30 minutes) |
-| selection | points model | availability: P(plays) against who played, from the projections saved before each deadline (needs three gameweeks of them) |
-| captaincy | points model at the top end: actual points of each week's ten best projections | |
-| hits | optimiser replay | |
-| chips, operations | (no setting covers them) | |
+| points model | accuracy of every likely starter's projection | actual points of each week's 30 best projections |
+| top end | actual points of each week's ten best projections (same projections as the points model) | overall accuracy |
+| availability | P(plays) against who played, from the projections saved before each deadline (needs three gameweeks of them) | |
+| optimiser replay | points the optimiser scores replayed over last season and this one (about 30 minutes; `--light` skips it) | |
 
-When no setting passes, or no setting covers the factor, the run writes a brief for a code change in
+The limiting factor still labels the review and the run, and when it is settled its ideas aim the
+code-change brief. When no setting passes, the run writes a brief for a code change in
 `reports/gwNN_improvement.md`. The brief is aimed by evidence: the first pooled model error marked
 *act*; else, if the factor is settled, the factor's ideas; else it says plainly that no change is well
 aimed that week. (The settings are at a local optimum: in GW11 none of the 30 one-step changes passed,
@@ -196,7 +199,7 @@ What Discord tells you about a scheduled run:
 | Report | Meaning | What you do |
 |---|---|---|
 | "GWnn self-improvement: *factor*", green | A setting changed (`fpl improve --revert ID` undoes it) | Nothing |
-| the same, blue | No setting changed. It says why: no setting covers the factor, none passed, or a test could not run (the availability test needs projections saved before three deadlines) | Optional: run `/fpl-improve` on the brief. The autopilot carries on either way |
+| the same, blue | No setting changed. It says why: none passed, or a test could not run (the availability test needs projections saved before three deadlines) | Optional: run `/fpl-improve` on the brief. The autopilot carries on either way |
 | "GWnn self-improvement failed", red | The run stopped with an error; the traceback is in `reports/auto.log` | Look at the error; the next run tries again. The same error is reported once per gameweek |
 
 A gameweek no run worked on (the computer was off or every run failed while it was due) is named
