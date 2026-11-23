@@ -23,9 +23,10 @@ for attempt in $(seq 1 "$tries"); do
     sleep "${FPL_AUTO_RETRY_SECONDS:-600}"
   fi
 done
-# After a gameweek's review is final, and while no deadline is close, test changes to the settings
-# behind its limiting factor (fpl improve). It runs inside the lock, so no plan runs meanwhile, and
-# reports its own result or failure to Discord.
-if [ "${FPL_SELF_IMPROVE:-on}" != "off" ]; then
+# With FPL_SELF_IMPROVE=on: after a gameweek's review is final, and while no deadline is close, test
+# changes to the settings behind its limiting factor (fpl improve). It runs inside the lock, so no
+# plan runs meanwhile, and reports its own result or failure to Discord. Off by default until
+# `fpl improve` has had three clean manual runs.
+if [ "${FPL_SELF_IMPROVE:-off}" = "on" ]; then
   .venv/bin/fpl improve --if-due > /dev/null || echo "self-improvement run ended with an error"
 fi

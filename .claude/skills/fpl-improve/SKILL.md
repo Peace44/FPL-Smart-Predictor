@@ -22,9 +22,10 @@ before keeping it. Work from evidence, one change at a time.
 
 ## 2. Settings first: `fpl improve`
 
-- If `reports/gwNN_improvement.md` already exists for this review (the scheduler runs
-  `fpl improve --if-due` on its own), read it. Otherwise run `.venv/bin/fpl improve <review>`. It
-  takes 5 to 10 minutes, or about 30 if it replays the optimiser; use `--light` to skip that replay.
+- If `reports/gwNN_improvement.md` already exists for this review (with `FPL_SELF_IMPROVE=on` the
+  scheduler runs `fpl improve --if-due` on its own), read it. Otherwise run
+  `.venv/bin/fpl improve <review>`. It takes 5 to 10 minutes, or about 30 if it replays the
+  optimiser; use `--light` to skip that replay.
 - If it changed a setting: report the knob, old and new values, and the evidence (z-scores). Run
   `.venv/bin/python -m pytest -q`. Offer to commit `tuning/params.json` and `tuning/ledger.md`.
   Then stop: one change per review.
