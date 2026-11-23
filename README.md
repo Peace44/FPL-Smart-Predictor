@@ -340,9 +340,9 @@ After every run that planned or changed something:
   - every run that planned or acted: what it did, the plan, the line-up, anything that needs you;
   - a run that failed, and a sign-in that has expired;
   - a check with nothing to do yet, at most every six hours, so you can see the schedule is alive;
-  - each finished gameweek: points, the game average, overall rank and how far it moved;
-  - each gameweek review, with its limiting factor, and each self-improvement run's result or
-    failure (see *The weekly review and self-improvement*);
+  - each finished gameweek, one message with its review: points, the game average, overall rank
+    and how far it moved, then the limiting factor;
+  - each self-improvement run's result or failure (see *The weekly review and self-improvement*);
   - the start of a new season.
 
   `reports/auto.log` records whether each report was delivered. Anyone who has the webhook

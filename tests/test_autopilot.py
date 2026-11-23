@@ -483,28 +483,27 @@ def test_discord_message_fits_the_limits_and_goes_only_to_discord(monkeypatch):
     assert notify.discord("hello") is False                                      # a failed send never raises
 
 
-def test_gameweek_result_is_reported_once(monkeypatch, tmp_path):
+def test_gameweek_result_is_reported_once_with_the_review(monkeypatch, tmp_path):
+    from fpl_smart import gwreview
     monkeypatch.setattr(autopilot, "REPORTS", tmp_path)
-    monkeypatch.setattr(autopilot, "team_id", lambda: 1)
-    hist = {"current": [{"event": 10, "points": 50, "total_points": 534, "overall_rank": 6_300_000, "event_transfers": 1,
-                         "event_transfers_cost": 0, "points_on_bench": 3},
-                        {"event": 11, "points": 71, "total_points": 601, "overall_rank": 5_900_000, "event_transfers": 11,
-                         "event_transfers_cost": 4, "points_on_bench": 6}],
-            "chips": [{"name": "wildcard", "event": 11}]}
-    monkeypatch.setattr(autopilot.fpl_api, "entry_history", lambda *a, **k: hist)
+    summary = {"points": 71, "hits": 4, "net": 67, "average": 55, "overall_rank": 5_900_000,
+               "overall_rank_prev": 6_300_000, "total_points": 601, "bench_points": 6, "transfers": 11, "plan_xp": 62.4}
+    rv = gwreview.Review(11, True, {"gw": 11, "chip": "wildcard", "summary": summary})
+    monkeypatch.setattr(gwreview, "write", lambda gw, log=print: (tmp_path / "gw11_review.md", rv, "# Gameweek 11 review"))
+    monkeypatch.setattr(autopilot.notify, "publish", lambda files: None)
     got = []
-    ok = {"value": False}
-    monkeypatch.setattr(autopilot.notify, "discord", lambda title, lines=(), problems=(), kind=None, **k: got.append((title, list(lines), kind)) or ok["value"])
-    bs = {"events": [{"id": 10, "finished": True, "data_checked": True, "average_entry_score": 48},
-                     {"id": 11, "finished": True, "data_checked": True, "average_entry_score": 55},
+    monkeypatch.setattr(autopilot.notify, "discord", lambda title, lines=(), problems=(), kind=None, **k: got.append((title, list(lines), kind)) or True)
+    (tmp_path / "gw11").mkdir()
+    (tmp_path / "gw11" / "autopilot.json").write_text(json.dumps({"gw": 11, "settled": True}))
+    bs = {"events": [{"id": 10, "finished": True, "data_checked": True},
+                     {"id": 11, "finished": True, "data_checked": True},
                      {"id": 12, "finished": False, "data_checked": False}]}
-    assert autopilot.result_report(bs) is False and len(got) == 1        # Discord did not take it: not marked as done
-    ok["value"] = True
-    assert autopilot.result_report(bs) is True and autopilot.result_report(bs) is False and len(got) == 2
-    title, lines, kind = got[-1]
+    assert autopilot.review_step(bs) is True and autopilot.review_step(bs) is False and len(got) == 1
+    title, lines, kind = got[0]
     text = " ".join(lines)
-    assert title == "GW11 result: 67 points" and kind == "ok"
+    assert title == "GW11 review: 67 points" and kind == "ok"
     assert "71 minus 4" in text and "average was 55" in text and "up 400,000 places" in text and "Wildcard" in text
+    assert "Transfers made: 11" in text and "projected 62 points" in text and "The autopilot set this team." in text
 
 
 def test_idle_check_reports_at_most_every_few_hours(monkeypatch, tmp_path):

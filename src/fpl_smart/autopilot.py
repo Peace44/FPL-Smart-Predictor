@@ -173,54 +173,10 @@ def idle_check(account, gw: int, deadline: pd.Timestamp, left_h: float, now: pd.
     return problem
 
 
-def result_report(bs: dict, log=print) -> bool:
-    """Once per finished gameweek: what the team scored and where it stands. Sent to Discord only;
-    it is marked as done only when Discord took it, so a failed send is repeated on the next run."""
-    done = [e for e in bs["events"] if e.get("finished") and e.get("data_checked")]
-    if not done:
-        return False
-    ev = max(done, key=lambda e: e["id"])
-    gw = ev["id"]
-    if _state().get("reported_gw", 0) >= gw:
-        return False
-    hist = fpl_api.entry_history(team_id(), 0.0)
-    rows = {g["event"]: g for g in hist.get("current", [])}
-    g, prev = rows.get(gw), rows.get(gw - 1)
-    if g is None:
-        return False
-    cost = int(g.get("event_transfers_cost") or 0)
-    net = int(g["points"]) - cost
-    avg = ev.get("average_entry_score")
-    lines = [f"Scored {net} points" + (f" ({g['points']} minus {cost} for transfers)" if cost else "")
-             + (f"; the game average was {avg}" if avg is not None else "") + "."]
-    if g.get("overall_rank"):
-        move = ""
-        if prev and prev.get("overall_rank"):
-            d = prev["overall_rank"] - g["overall_rank"]
-            move = f" (up {d:,} places)" if d > 0 else f" (down {-d:,} places)" if d < 0 else " (unchanged)"
-        lines.append(f"Overall: {g['total_points']} points, rank {g['overall_rank']:,}{move}.")
-    chip = next((c["name"] for c in hist.get("chips", []) if c.get("event") == gw), None)
-    if chip:
-        lines.append(f"Chip played: {CHIP_NAMES.get(chip, chip)}.")
-    lines.append(f"Transfers made: {g.get('event_transfers', 0)}; points left on the bench: {g.get('points_on_bench', 0)}.")
-    try:
-        plan = json.loads((REPORTS / f"gw{gw:02d}" / "latest.json").read_text())
-        lines.append(f"The plan had projected {plan['xp']:.0f} points for its line-up.")
-    except (OSError, ValueError, KeyError):
-        pass
-    ran = last_run(gw)
-    lines.append("The autopilot set this team." if ran and ran.get("settled")
-                 else "The autopilot did not change the team for this gameweek.")
-    kind = "ok" if avg is not None and net >= avg else "info"
-    if _report(log, f"GW{gw} result: {net} points", lines, kind=kind):
-        _save_state(reported_gw=gw)
-        return True
-    return False
-
-
 def review_step(bs: dict, log=print) -> bool:
-    """Once per checked gameweek: write reports/gwNN_review.md (rewriting a provisional one) and say so.
-    Marked done only once written, so a failure is retried on the next run."""
+    """Once per checked gameweek: write reports/gwNN_review.md (rewriting a provisional one) and send
+    the one Discord message for that gameweek: its result and what the review found. Marked done once
+    written, so a failure to write is retried on the next run."""
     from . import gwreview
     done = [e for e in bs["events"] if e.get("finished") and e.get("data_checked")]
     if not done:
@@ -232,7 +188,10 @@ def review_step(bs: dict, log=print) -> bool:
     _save_state(reviewed_gw=gw)
     log(f"GW{gw} review written to {path}")
     notify.publish({path.name: text[: text.rfind(gwreview.DATA_OPEN)]})
-    _report(log, f"GW{gw} review", gwreview.summary_lines(rv), kind="info")
+    S, ran = rv.data["summary"], last_run(gw)
+    kind = "ok" if S.get("average") is not None and S["net"] >= S["average"] else "info"
+    _report(log, f"GW{gw} review: {S['net']} points",
+            gwreview.summary_lines(rv, autopilot_set=bool(ran and ran.get("settled"))), kind=kind)
     return True
 
 
@@ -298,12 +257,8 @@ def _run(force: bool, dry_run: bool, quick: bool, apply_now: bool, log) -> int:
     account = acc.Account.from_env()
     if not dry_run:
         try:
-            result_report(bs, log)
-        except Exception as e:  # noqa: BLE001  (a report must never stop the run that manages the team)
-            log(f"could not send the gameweek result: {e!r}")
-        try:
             review_step(bs, log)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001  (a report must never stop the run that manages the team)
             log(f"could not write the gameweek review: {e!r}")
     if not force and not apply_now and left > s.plan_within_h:
         log(f"GW{gw} deadline is {left / 24:.1f} days away; nothing to do")

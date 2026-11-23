@@ -506,6 +506,7 @@ def build(gw: int | None = None, entry_id: int | None = None, log=lambda m: None
                     "overall_rank_prev": (rows.get(gw - 1) or {}).get("overall_rank"),
                     "total_points": (me or {}).get("total_points") or eh.get("total_points"),
                     "total_players": total_players, "bench_points": eh.get("points_on_bench"),
+                    "transfers": eh.get("event_transfers"), "plan_xp": (plan or {}).get("xp"),
                     "projected": proj["xi_projected"] if proj else (plan or {}).get("xp")},
         "team": {k: ours[k] for k in ("best_xi", "xi", "selection", "captain_extra", "chip_extra", "hits", "net",
                                        "best_captain", "captain_loss", "bench_points")}
@@ -1092,11 +1093,27 @@ def write(gw: int | None = None, log=lambda m: None) -> tuple[Path, Review, str]
     return path, rv, text
 
 
-def summary_lines(rv: Review) -> list[str]:
-    """A few lines for the Discord report."""
+def summary_lines(rv: Review, autopilot_set: bool | None = None) -> list[str]:
+    """The one Discord message per finished gameweek: the result, then what the review found.
+    `autopilot_set`: whether the autopilot set this team (None: not known, so not said)."""
     D, S = rv.data, rv.data["summary"]
-    lines = [f"{S['net']} points" + (f" against {D['projection']['xi_projected']:.0f} projected" if D.get("projection") else "")
-             + f"; average {S['average']}."]
+    lines = [f"Scored {S['net']} points" + (f" ({S['points']} minus {S['hits']} for transfers)" if S.get("hits") else "")
+             + (f" against {D['projection']['xi_projected']:.0f} projected" if D.get("projection") else "")
+             + (f"; the game average was {S['average']}" if S.get("average") is not None else "") + "."]
+    if S.get("overall_rank"):
+        move, prev = "", S.get("overall_rank_prev")
+        if prev:
+            d = prev - S["overall_rank"]
+            move = f" (up {d:,} places)" if d > 0 else f" (down {-d:,} places)" if d < 0 else " (unchanged)"
+        lines.append(f"Overall: {S['total_points']} points, rank {S['overall_rank']:,}{move}.")
+    if D.get("chip"):
+        lines.append(f"Chip played: {CHIP_NAMES.get(D['chip'], D['chip'])}.")
+    lines.append(f"Transfers made: {S.get('transfers') or 0}; points left on the bench: {S.get('bench_points') or 0}.")
+    if S.get("plan_xp") is not None:
+        lines.append(f"The plan had projected {S['plan_xp']:.0f} points for its line-up.")
+    if autopilot_set is not None:
+        lines.append("The autopilot set this team." if autopilot_set
+                     else "The autopilot did not change the team for this gameweek.")
     if D.get("elite"):
         lines.append(f"Top {D['elite']['n']} average: {D['elite']['avg']['net']:.1f}.")
     if D.get("limiting_factor"):
