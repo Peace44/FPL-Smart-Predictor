@@ -3,24 +3,28 @@ from dataclasses import replace
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from fpl_smart import backtest, optimise, planner, report
-from fpl_smart.solver import Plan, hold_value, solve
+from fpl_smart.solver import Plan, SolverOptions, hold_value, solve
 from fpl_smart.xp import Projection
 
-from conftest import check_squad
+from conftest import SMALL, check_squad
 
 CHIPS = [{"name": n, "gws": [1, 2, 3]} for n in ("wildcard", "freehit", "bboost", "3xc")]
 
 
-def _search(market, opts, state, **kw):
+@pytest.fixture(scope="module")
+def chip_search(market, squad_state):
+    """One chip search (about 15 s) shared by the tests that read it. The options are built here
+    because the `opts` fixture is function-scoped."""
     players, xp = market
-    o = replace(opts, use_chips=True, chips=CHIPS, time_limit=20)
-    return optimise.chip_search(xp, players, state, 3, o, workers=1, search_time=10, polish_time=5, top=2, **kw)
+    o = SolverOptions(per_pos_keep=dict(SMALL), time_limit=20, use_chips=True, chips=CHIPS, threads=1)
+    return optimise.chip_search(xp, players, squad_state, 3, o, workers=1, search_time=10, polish_time=5, top=2)
 
 
-def test_chip_search_tries_every_week_and_ranks(market, opts, squad_state):
-    cs = _search(market, opts, squad_state)
+def test_chip_search_tries_every_week_and_ranks(chip_search):
+    cs = chip_search
     tried = {(p.wildcard_gw, p.freehit_gw) for p in cs.scenarios}
     assert {(None, None), (1, None), (2, None), (3, None), (None, 1), (None, 2), (None, 3)} <= tried
     assert any(w and f for w, f in tried)                       # combinations were explored
@@ -76,10 +80,10 @@ def _projection(market):
     return Projection(pl, xp, pd.DataFrame(), pd.DataFrame(rows), None, 1)
 
 
-def test_report_renders_every_section(market, opts, squad_state):
+def test_report_renders_every_section(market, opts, squad_state, chip_search):
     players, xp = market
     P = _projection(market)
-    cs = _search(market, opts, squad_state)
+    cs = chip_search
     plan = cs.choose()
     hold = hold_value(xp, players, squad_state, 3, opts)
     rb = optimise.robustness(xp, players, squad_state, plan, 3, replace(opts, use_chips=True, chips=CHIPS),
