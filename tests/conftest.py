@@ -58,7 +58,7 @@ def squad_state(market):
                      w.bank, 1)
 
 
-def check_squad(week, players, budget_ok=True):
+def check_squad(week, players):
     pos = players["pos"]
     assert len(week.squad) == len(set(week.squad)) == 15
     assert pos[week.squad].value_counts().to_dict() == {2: 5, 3: 5, 1: 2, 4: 3}

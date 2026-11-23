@@ -243,10 +243,9 @@ def _minutes_model(ms: pd.DataFrame, tag: str, retrain: bool = False) -> MN.Minu
     return mm
 
 
-def project_live(horizon: int = 8, use_odds: bool = True, refresh: bool = True,
-                 params: PM.PlayerParams | None = None, team_params: TM.TeamParams | None = None) -> Projection:
+def project_live(horizon: int = 8, refresh: bool = True) -> Projection:
     from . import tuning
-    params, team_params = params or tuning.player_params(), team_params or tuning.team_params()
+    params, team_params = tuning.player_params(), tuning.team_params()
     av = tuning.availability()
     now = pd.Timestamp.now(tz="UTC")
     bs = fpl_api.bootstrap(0.0 if refresh else 6.0)
@@ -280,7 +279,7 @@ def project_live(horizon: int = 8, use_odds: bool = True, refresh: bool = True,
     tf = team_fixture_rows(up, codes)
     tf = tf[(tf["gw"] >= nxt) & (tf["gw"] <= last_gw)].copy()
     tf["season"] = CURRENT_SEASON
-    odds_df, odds_info = (odds_mod.upcoming_lambdas(3.0 if refresh else 48.0) if use_odds else (None, {}))
+    odds_df, odds_info = odds_mod.upcoming_lambdas(3.0 if refresh else 48.0)
     tf = add_lambdas(tf, ratings, odds_df, team_params.odds_blend)
 
     el = pd.DataFrame(bs["elements"]).set_index("id")

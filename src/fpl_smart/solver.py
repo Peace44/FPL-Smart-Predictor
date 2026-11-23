@@ -43,7 +43,6 @@ class SolverOptions:
     # week, because its benefit is spread over the weeks after it is played.
     chip_reserve: dict = field(default_factory=lambda: {"wildcard": 1.7, "freehit": 7.0, "bboost": 8.0, "3xc": 6.0})
     max_hits_per_gw: int = 2
-    max_transfers_gw1: int | None = None
     no_transfers: bool = False
     banned: tuple = ()
     locked: tuple = ()
@@ -306,9 +305,6 @@ def solve(xp: pd.DataFrame, players: pd.DataFrame, state: TeamState,
         if chip[c] and not info[c]["expires"]:
             scale = sum(disc[wc_t:]) if c == "wildcard" else 1.0
             obj.append(-opt.chip_reserve.get(c, 0.0) * scale * pulp.lpSum(chip[c].values()))
-    if opt.max_transfers_gw1 is not None:
-        if wc_t != 0:
-            m += pulp.lpSum(tin[p, 0] for p in pool) <= opt.max_transfers_gw1
     if opt.no_transfers:
         for p, t in PT:
             m += tin[p, t] == 0

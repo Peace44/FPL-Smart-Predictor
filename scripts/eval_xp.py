@@ -13,7 +13,7 @@ ms0 = ms0.join(mwf[['p_play','p60','emin']].rename(columns={'p60':'p60_hat'}))
 ms0 = PM.prepare(ms0, twf)
 bf = MN.backtest_features(ms0)
 
-def run(test, p=PM.PlayerParams(), verbose=True, mode='prior'):
+def run(test, p=PM.PlayerParams(), verbose=True):
     start = ms0[ms0.season==test].kickoff.min()
     train = (ms0.kickoff < start).to_numpy()
     if test=='2025-26':   # first season with defensive-contribution data: calibrate that part in-season
@@ -27,7 +27,7 @@ def run(test, p=PM.PlayerParams(), verbose=True, mode='prior'):
     te = ms[ms.season==test]
     R = PM.rates(S.loc[te.index], te.pos, te.value, cal, p)
     key = te.team_code.astype(str)+'_'+te.fixture.astype(str)
-    E = PM.expected_points_team(R, key, te.pos, te.lam, te.lam_a, te.p_play, te.p60_hat, te.emin, cal, defcon=test>='2025-26', mode=mode)
+    E = PM.expected_points_team(R, key, te.pos, te.lam, te.lam_a, te.p_play, te.p60_hat, te.emin, cal, defcon=test>='2025-26')
     return te, E, cal
 
 def report(te, E, label):

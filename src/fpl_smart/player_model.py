@@ -308,15 +308,13 @@ def expected_points(R: pd.DataFrame, pos, lam, lam_a, p_play, p60, emin, cal: Ca
 
 
 def expected_points_team(R: pd.DataFrame, team_key, pos, lam, lam_a, p_play, p60, emin, cal: Calibration,
-                         scoring: dict | None = None, defcon: bool = True, mode: str = "prior") -> pd.DataFrame:
+                         scoring: dict | None = None, defcon: bool = True) -> pd.DataFrame:
     """expected_points with each team's goal and assist shares balanced so they add up to the team's
     expected goals. If a talisman is out, his goals go to whoever is on the pitch instead of vanishing.
 
-    mode "prior": rescale only the *prior* part of each share, so players with a long record keep
-    their evidence-based share and unproven ones absorb the adjustment. "prop": scale everyone.
+    Only the *prior* part of each share is rescaled, so players with a long record keep their
+    evidence-based share and unproven ones absorb the adjustment.
     `team_key` identifies the (team, fixture) of every row."""
-    if mode == "none":
-        return expected_points(R, pos, lam, lam_a, p_play, p60, emin, cal, scoring, defcon)
     key = pd.Series(list(team_key) if not isinstance(team_key, pd.Series) else team_key.to_numpy(), index=R.index)
     posa = np.asarray(pos)
     w = np.asarray(emin, float) / 90.0
@@ -325,14 +323,13 @@ def expected_points_team(R: pd.DataFrame, team_key, pos, lam, lam_a, p_play, p60
                                          ("a_share", "a_ev", "a_pr", "assists", cal.team_sums[1])):
         mult = np.array([cal.mult.get(comp, {}).get(int(x), 1.0) for x in posa])
         ww = pd.Series(w * mult, index=R.index)
-        if mode == "prior":
-            s_ev = (ww * R[ev]).groupby(key).transform("sum").to_numpy()
-            s_pr = (ww * R[pr_]).groupby(key).transform("sum").to_numpy()
-            c = np.clip((target - s_ev) / np.where(s_pr > 1e-6, s_pr, 1.0), 0.3, 3.0)
-            R[share] = R[ev].to_numpy() + c * R[pr_].to_numpy()
+        s_ev = (ww * R[ev]).groupby(key).transform("sum").to_numpy()
+        s_pr = (ww * R[pr_]).groupby(key).transform("sum").to_numpy()
+        c = np.clip((target - s_ev) / np.where(s_pr > 1e-6, s_pr, 1.0), 0.3, 3.0)
+        R[share] = R[ev].to_numpy() + c * R[pr_].to_numpy()
         tot = (ww * R[share]).groupby(key).transform("sum").to_numpy()
-        lim = (0.9, 1.1) if mode == "prior" else (0.6, 1.8)   # mop up what the prior could not absorb
-        R[share] = R[share].to_numpy() * np.clip(target / np.where(tot > 0.05, tot, target), *lim)
+        # mop up what the prior could not absorb
+        R[share] = R[share].to_numpy() * np.clip(target / np.where(tot > 0.05, tot, target), 0.9, 1.1)
     return expected_points(R, pos, lam, lam_a, p_play, p60, emin, cal, scoring, defcon).assign(
         g_share=R["g_share"], a_share=R["a_share"])
 

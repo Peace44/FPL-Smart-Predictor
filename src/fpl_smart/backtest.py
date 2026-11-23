@@ -199,17 +199,16 @@ def simulate(data: dict[int, GWData], season: str, strategy: str = "plan", horiz
 
 
 def _sim_job(args) -> BacktestResult:
-    data, season, strategy, horizon, opt = args
-    return simulate(data, season, strategy, horizon, opt)
+    data, season, strategy, horizon = args
+    return simulate(data, season, strategy, horizon)
 
 
 def run(season: str = "2025-26", strategies: list[str] | None = None, horizon: int = 8, first_gw: int = 1,
-        last_gw: int = 38, workers: int | None = None, opt: SolverOptions | None = None,
-        log=lambda m: None) -> list[BacktestResult]:
+        last_gw: int = 38, workers: int | None = None, log=lambda m: None) -> list[BacktestResult]:
     strategies = list(strategies or STRATEGIES)
     data = project_season(season, horizon, first_gw, last_gw, log=log)
     log(f"simulating {', '.join(strategies)} over GW{min(data)}-{max(data)}")
-    jobs = [(data, season, s, horizon, opt) for s in strategies]
+    jobs = [(data, season, s, horizon) for s in strategies]
     if (workers or len(jobs)) <= 1 or len(jobs) == 1:
         return [_sim_job(j) for j in jobs]
     with worker_pool(min(workers or len(jobs), len(jobs))) as ex:
