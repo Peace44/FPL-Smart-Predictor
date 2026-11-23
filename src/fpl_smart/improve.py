@@ -329,7 +329,7 @@ def result_lines(f: str, outcomes: list[Outcome], adopted: Trial | None, brief: 
         L = [f"Changed {adopted.knob} {adopted.old:g} → {adopted.new:g} ({adopted.primary.metric} better by "
              f"{adopted.primary.z:.1f} s.e.). Nothing for you to do."]
     else:
-        L = [unchanged(outcomes)] +([aim(f, cert, list(found))] if cert is not None else []) + [
+        L = [unchanged(outcomes)] + ([aim(f, cert, list(found))] if cert is not None else []) + [
              f"A brief for a code change is in {brief}. To act on it, run /fpl-improve in Claude Code "
              "(optional: the autopilot carries on with the current settings either way)."]
     L += [f"GW{g} was never worked on: {why}." for g, why in skipped]
