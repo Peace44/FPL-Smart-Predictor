@@ -126,8 +126,8 @@ Known limits:
 
 ## The weekly review and self-improvement
 
-When a gameweek's data is final, the autopilot writes **`reports/gwNN_review.md`** (also copied to
-`Documents\FPL` and announced on Discord). Run `fpl review` to write one yourself. A review written
+When a gameweek's data is final, the autopilot writes **`reports/gwNN_review.md`** (and announces
+it on Discord). Run `fpl review` to write one yourself. A review written
 before FPL has checked the data is marked provisional and is rewritten later. It covers:
 
 - **Against the projection:** each player's projected and actual points, and where the team's gap
@@ -332,8 +332,6 @@ After every run that planned or changed something:
 
 - `reports/status.md` says what it did and whether anything needs you; `reports/actions.log`
   lists every change made to your account; `reports/gwNN/applied-*.json` has the exact requests.
-- On WSL the status and the latest plan are also copied to `Documents\FPL` on the Windows side
-  (`FPL_WINDOWS_DIR` changes the folder, `off` disables it).
 - With `DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...` in `.env` (Discord: channel
   settings → Integrations → Webhooks), a report goes to that channel for:
   - every run that planned or acted: what it did, the plan, the line-up, anything that needs you;

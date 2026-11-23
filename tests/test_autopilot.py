@@ -490,7 +490,6 @@ def test_gameweek_result_is_reported_once_with_the_review(monkeypatch, tmp_path)
                "overall_rank_prev": 6_300_000, "total_points": 601, "bench_points": 6, "transfers": 11, "plan_xp": 62.4}
     rv = gwreview.Review(11, True, {"gw": 11, "chip": "wildcard", "summary": summary})
     monkeypatch.setattr(gwreview, "write", lambda gw, log=print: (tmp_path / "gw11_review.md", rv, "# Gameweek 11 review"))
-    monkeypatch.setattr(autopilot.notify, "publish", lambda files: None)
     got = []
     monkeypatch.setattr(autopilot.notify, "discord", lambda title, lines=(), problems=(), kind=None, **k: got.append((title, list(lines), kind)) or True)
     (tmp_path / "gw11").mkdir()

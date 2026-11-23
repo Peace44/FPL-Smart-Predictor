@@ -184,10 +184,9 @@ def review_step(bs: dict, log=print) -> bool:
     gw = max(e["id"] for e in done)
     if _state().get("reviewed_gw", 0) >= gw:
         return False
-    path, rv, text = gwreview.write(gw, log=log)
+    path, rv, _ = gwreview.write(gw, log=log)
     _save_state(reviewed_gw=gw)
     log(f"GW{gw} review written to {path}")
-    notify.publish({path.name: text[: text.rfind(gwreview.DATA_OPEN)]})
     S, ran = rv.data["summary"], last_run(gw)
     kind = "ok" if S.get("average") is not None and S["net"] >= S["average"] else "info"
     _report(log, f"GW{gw} review: {S['net']} points",
@@ -234,7 +233,6 @@ def run(force: bool = False, dry_run: bool = False, quick: bool = False, apply_n
             REPORTS.mkdir(parents=True, exist_ok=True)
             text = "# FPL autopilot\n\n## Needs your attention\n\n- " + msg + "\n"
             (REPORTS / "status.md").write_text(text)
-            notify.publish({"status.md": text})
             _report(log, "A run failed", [], [msg], "error")
         return 1
 
@@ -264,8 +262,6 @@ def _run(force: bool, dry_run: bool, quick: bool, apply_now: bool, log) -> int:
         problem = idle_check(account, gw, deadline, left, now, s, log=log)
         if problem:
             log(f"sign-in problem: {problem}")
-            notify.publish({"status.md": status_text(gw, deadline, now, "plans only", [], [
-                f"Could not sign in to FPL, so nothing can be changed on your team: {problem}"])})
         return 0
 
     # ---- the account, if a sign-in is set up
@@ -362,7 +358,6 @@ def _run(force: bool, dry_run: bool, quick: bool, apply_now: bool, log) -> int:
 
     # ---- tell the owner
     if not dry_run:
-        notify.publish({"status.md": status, "latest-plan.md": text})
         changed = bool(outcome and outcome.changed)
         what = ("needs your attention" if problems else "team updated" if changed
                 else "team checked, nothing to change" if outcome else "plan ready")

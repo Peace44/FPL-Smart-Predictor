@@ -1,67 +1,14 @@
-"""Tell the owner what happened, for someone who does not open WSL.
-
-All best effort (a failure here never stops a run):
-* a copy of the status and the latest plan in a Windows folder (default: Documents\\FPL);
-* a message to a Discord channel, when DISCORD_WEBHOOK_URL is set in `.env`.
-
-Outside WSL (no powershell.exe) the copy does nothing.
+"""Tell the owner what happened, for someone who does not open WSL: a message to a Discord channel,
+when DISCORD_WEBHOOK_URL is set in `.env`. Best effort: a failure here never stops a run.
 """
 from __future__ import annotations
 
-import base64
 import datetime
 import os
-import shutil
-import subprocess
 import time
-from pathlib import Path
 
 import requests
 
-
-def _powershell(script: str, timeout: int = 20) -> str | None:
-    exe = shutil.which("powershell.exe")
-    if not exe:
-        return None
-    try:
-        enc = base64.b64encode(script.encode("utf-16-le")).decode()
-        r = subprocess.run([exe, "-NoProfile", "-NonInteractive", "-EncodedCommand", enc], capture_output=True,
-                           timeout=timeout, cwd="/mnt/c" if os.path.isdir("/mnt/c") else None)
-        return r.stdout.decode("utf-8", "replace").replace("\r", "").strip() if r.returncode == 0 else None
-    except (OSError, subprocess.SubprocessError):
-        return None
-
-
-def windows_dir() -> Path | None:
-    """Where copies go: FPL_WINDOWS_DIR (a WSL path), else Documents\\FPL. "off" disables copies."""
-    custom = os.environ.get("FPL_WINDOWS_DIR")
-    if custom:
-        return None if custom.lower() in ("off", "none", "0") else Path(custom)
-    docs = _powershell("[Environment]::GetFolderPath('MyDocuments')")
-    if not docs or not shutil.which("wslpath"):
-        return None
-    try:
-        r = subprocess.run(["wslpath", "-u", docs], capture_output=True, text=True, timeout=10)
-    except (OSError, subprocess.SubprocessError):
-        return None
-    return Path(r.stdout.strip()) / "FPL" if r.returncode == 0 and r.stdout.strip() else None
-
-
-def publish(files: dict[str, str]) -> Path | None:
-    """Write {file name: text} into the Windows folder. Returns the folder, or None if unavailable."""
-    d = windows_dir()
-    if d is None:
-        return None
-    try:
-        d.mkdir(parents=True, exist_ok=True)
-        for name, text in files.items():
-            (d / name).write_text(text, encoding="utf-8")
-        return d
-    except OSError:
-        return None
-
-
-# ----------------------------------------------------------------------------- Discord
 DISCORD_WEBHOOKS = ("https://discord.com/api/webhooks/", "https://discordapp.com/api/webhooks/")
 COLOURS = {"ok": 0x2ECC71, "info": 0x3498DB, "warn": 0xE67E22, "error": 0xE74C3C}
 

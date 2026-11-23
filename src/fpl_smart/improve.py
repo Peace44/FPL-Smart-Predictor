@@ -37,7 +37,7 @@ import numpy as np
 import pandas as pd
 
 from . import evaluate as ev
-from . import evidence, fpl_api, gwreview, notify, tuning
+from . import evidence, fpl_api, gwreview, tuning
 from .autopilot import Settings, _report
 from .config import REPORTS
 
@@ -446,7 +446,6 @@ def _run(path: Path, dry_run: bool, factor: str | None, heavy: bool, budget_min:
         out.write_text(report)
         tuning.append_ledger(_ledger(gw, f, avg, outcomes, adopted, change, skipped, cert=cert, found=found))
         _mark_done(gw)
-        notify.publish({out.name: report})
         _report(log, f"GW{gw} self-improvement: {f}",
                 result_lines(f, outcomes, adopted, f"reports/{out.name}", skipped, cert=cert, found=found),
                 kind="ok" if adopted else "info")
