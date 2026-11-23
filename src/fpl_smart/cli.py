@@ -146,55 +146,16 @@ def cmd_backtest(a) -> int:
 
 
 def cmd_review(a) -> int:
-    """Write the gameweek review (reports/gwNN_review.md); --history: the older table of past plans."""
-    if not a.history:
-        from . import gwreview
-        try:
-            path, rv, text = gwreview.write(a.gw, log=_log)
-        except (RuntimeError, KeyError) as e:
-            print(f"error: {e}", file=sys.stderr)
-            return 2
-        if a.print:
-            print(text[: text.rfind(gwreview.DATA_OPEN)])
-        _log(f"{'final' if rv.final else 'provisional'} review written to {path}")
-        return 0
-    return _review_history()
-
-
-def _review_history() -> int:
-    """How past recommendations did: their line-ups scored with actual points, next to what you scored."""
-    import json
-
-    from . import fpl_api
-    from .config import REPORTS, team_id
-    from .scoring import score_gw
-    bs = fpl_api.bootstrap()
-    pos = {e["id"]: e["element_type"] for e in bs["elements"]}
-    done = {e["id"] for e in bs["events"] if e["finished"]}
-    avg = {e["id"]: e["average_entry_score"] for e in bs["events"]}
-    mine = {g["event"]: g["points"] - g["event_transfers_cost"]
-            for g in fpl_api.entry_history(team_id(), 1.0).get("current", [])}
-    rows = []
-    for f in sorted(REPORTS.glob("gw*/latest.json")):
-        r = json.loads(f.read_text())
-        if r["gw"] not in done:
-            continue
-        live = {e["id"]: e["stats"] for e in fpl_api.event_live(r["gw"], 24.0 * 365)["elements"]}
-        pts = {p: s["total_points"] for p, s in live.items()}
-        mins = {p: s["minutes"] for p, s in live.items()}
-        sc = score_gw(r["lineup"], r["bench"], r["captain"], r["vice"], pts, mins, pos, r.get("chip"))
-        got = sc.points - 4 * r.get("hits", 0)
-        rows.append({"GW": r["gw"], "projected": round(r["xp"], 1), "recommended team": int(got),
-                     "your team": mine.get(r["gw"]), "game average": avg.get(r["gw"]),
-                     "captain": r["names"].get(str(r["captain"]), r["captain"]), "captain pts": pts.get(r["captain"], 0)})
-    if not rows:
-        print("No finished gameweek has a saved recommendation yet (they are written by `fpl plan`).")
-        return 0
-    t = pd.DataFrame(rows).set_index("GW")
-    _show(t)
-    both = t.dropna(subset=["your team"])
-    print(f"\nTotal over {len(both)} gameweek(s): recommended {int(both['recommended team'].sum())}, "
-          f"yours {int(both['your team'].sum())}, average {int(both['game average'].sum())}")
+    """Write the gameweek review (reports/gwNN_review.md)."""
+    from . import gwreview
+    try:
+        path, rv, text = gwreview.write(a.gw, log=_log)
+    except (RuntimeError, KeyError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    if a.print:
+        print(text[: text.rfind(gwreview.DATA_OPEN)])
+    _log(f"{'final' if rv.final else 'provisional'} review written to {path}")
     return 0
 
 
@@ -312,8 +273,6 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("review", help="write the gameweek review to reports/gwNN_review.md")
     p.add_argument("--gw", type=int, help="gameweek to review (default: the latest one played)")
     p.add_argument("--print", action="store_true", help="also print the review")
-    p.add_argument("--history", action="store_true",
-                   help="instead: how every saved recommendation scored, next to your actual points")
     p.set_defaults(fn=cmd_review)
 
     p = sub.add_parser("improve", help="read the latest final review and test changes to its limiting factor")

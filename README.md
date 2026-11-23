@@ -33,7 +33,7 @@ Without an odds key the tool still works, using its own team ratings for every f
 | `fpl team` | Your squad with selling prices and projected points |
 | `fpl top --pos MID -n 20` | Best projected players (`--max-price`, `--team`, `--value`) |
 | `fpl player Haaland` | One player's projection per fixture, split into goals, assists, clean sheets, bonus... |
-| `fpl review` | The gameweek review in `reports/gwNN_review.md`: result against projection, progress towards first place, the limiting factor (`--gw N`; `--history` for the old table of past plans) |
+| `fpl review` | The gameweek review in `reports/gwNN_review.md`: result against projection, progress towards first place, the limiting factor (`--gw N`) |
 | `fpl improve` | Read the latest final review and test changes to the settings behind its limiting factor; keep one only if it is clearly better (`--dry-run`, `--revert ID`) |
 | `fpl evaluate` | Walk-forward accuracy of the points model; `--save NAME` / `--against NAME` compare two versions of the code |
 | `fpl backtest --season 2025-26` | Replay the optimiser over a finished season |
