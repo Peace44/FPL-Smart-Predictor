@@ -45,8 +45,6 @@ WINDOW = 6                      # gameweeks the limiting factor is averaged over
 ELITE_N = 50
 OVERALL_LEAGUE = 314
 THRESHOLD_RANKS = (1, 100, 1_000, 10_000, 100_000, 1_000_000)
-RANK_BANDS = (10_000_000, 5_000_000, 2_000_000, 1_000_000, 500_000, 250_000, 100_000, 50_000, 10_000,
-              1_000, 100, 10, 1)
 COMP_LABEL = {"app": "Appearance", "goals": "Goals", "assists": "Assists", "cs": "Clean sheets",
               "gc": "Goals conceded", "saves": "Saves", "pensave": "Penalty saves",
               "defcon": "Defensive contributions", "bonus": "Bonus", "cards": "Cards, own goals, missed pens",
@@ -339,13 +337,6 @@ def certainty_text(f: str, cert: dict) -> str:
     word = "Settled" if cert["settled"] else "Not settled"
     return (f"**{word}:** {lead} ({cert['t']:.1f} standard errors; with {cert['n']} gameweeks it takes "
             f"{cert['needed']:.1f}).")
-
-
-def _rank_band(rank: int | None) -> int | None:
-    if not rank:
-        return None
-    inside = [b for b in RANK_BANDS if rank <= b]
-    return min(inside) if inside else None
 
 
 def _fmt_rank(r) -> str:
@@ -883,7 +874,6 @@ def _render_sections(rv: Review, c: dict) -> list[str]:
             prev_or = o or prev_or
         sec += ["", "<details><summary>Season so far</summary>", "",
                 md_table(["GW", "Points", "Average", "GW rank", "Overall rank"], trows), "", "</details>"]
-        sec += ["", "Milestones:", ""] + [f"- {x}" for x in _milestones(hist, gw, c["reviews"], D)]
     if D.get("elite"):
         e = D["elite"]
         dfc = D["deficits"]
@@ -953,52 +943,6 @@ def _render_sections(rv: Review, c: dict) -> list[str]:
         sec += ["", "Changes in effect from earlier reviews: " + "; ".join(
             f"#{h['id']} {h['key']} {h['old']:g}→{h['new']:g} ({h['when'][:10]})" for h in hist_t[-5:]) + "."]
     out.append("\n".join(sec))
-    return out
-
-
-def _milestones(hist: list[dict], gw: int, reviews: list[dict], D: dict) -> list[str]:
-    out = []
-    g = {h["event"]: h for h in hist}
-    me, prev = g.get(gw), g.get(gw - 1)
-    ranked = [h for h in hist if h.get("overall_rank")]
-    if me and me.get("overall_rank"):
-        best = min(ranked, key=lambda h: h["overall_rank"])
-        if best["event"] == gw and len(ranked) > 1:
-            out.append(f"New season-best overall rank: {_fmt_rank(me['overall_rank'])}.")
-        else:
-            out.append(f"Season-best overall rank: {_fmt_rank(best['overall_rank'])} (GW{best['event']}).")
-        if prev and prev.get("overall_rank"):
-            b0, b1 = _rank_band(prev["overall_rank"]), _rank_band(me["overall_rank"])
-            if b1 and (b0 is None or b1 < b0):
-                out.append(f"Entered the top {b1:,}.")
-            elif b0 and (b1 is None or b1 > b0):
-                out.append(f"Dropped out of the top {b0:,}.")
-        streak = 0
-        for a, b in zip(reversed(ranked[:-1]), reversed(ranked)):
-            if b["overall_rank"] < a["overall_rank"]:
-                streak += 1
-            else:
-                break
-        if streak >= 1:
-            out.append(f"Green arrows in a row: {streak}.")
-        nxt = max((b for b in RANK_BANDS if b < me["overall_rank"]), default=None)
-        if nxt:
-            out.append(f"Next milestone: the top {nxt:,} ({me['overall_rank'] - nxt:,} places to go).")
-    if me:
-        best_gw = min((h for h in hist if h.get("rank")), key=lambda h: h["rank"], default=None)
-        if best_gw and best_gw["event"] == gw and len(hist) > 1:
-            out.append(f"Best gameweek rank of the season: {_fmt_rank(me['rank'])}.")
-    bs = fpl_api.bootstrap(1.0)
-    avg = {e["id"]: e["average_entry_score"] for e in bs["events"]}
-    beat = sum(1 for h in hist if h["points"] - h["event_transfers_cost"] > (avg.get(h["event"]) or 0))
-    out.append(f"Beat the game average in {beat} of {len(hist)} gameweeks.")
-    eng = [r for r in reviews if r.get("engine_managed")] + ([D] if D.get("engine_managed") else [])
-    if eng:
-        tot = sum(r["summary"]["net"] for r in eng)
-        av = sum(r["summary"]["average"] or 0 for r in eng)
-        el = [r["elite"]["avg"]["net"] for r in eng if r.get("elite")]
-        out.append(f"Since the engine took over ({len(eng)} gameweek{'s' if len(eng) != 1 else ''}): {tot} points, "
-                   f"{_signed(tot - av, 0)} against the average" + (f", {_signed(tot - sum(el), 0)} against the top 50." if el else "."))
     return out
 
 
