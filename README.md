@@ -186,13 +186,12 @@ untried idea on a branch, proves it with `fpl evaluate --against` and the tests,
 the ledger, and asks before merging. When a review missed something, the skill also extends what the
 review measures.
 
-Scheduled self-improvement is off until `fpl improve` has had three clean manual runs on final
-reviews. To switch it on, set `FPL_SELF_IMPROVE=on` in the environment of the scheduled task (for
-cron, put `FPL_SELF_IMPROVE=on` before the command). `scripts/auto.sh` then runs
-`fpl improve --if-due` after each check. It works on a new final review only, and only while the
-next deadline is more than 50 hours away (the autopilot's 48-hour planning window plus two hours,
-so a run ends before planning starts). A review that becomes final inside that window waits until
-the deadline has passed, and is worked on then unless the next gameweek's review is final first.
+`scripts/auto.sh` runs `fpl improve --if-due` after each check. It works on a new final review
+only, and only while the next deadline is more than 50 hours away (the autopilot's 48-hour
+planning window plus two hours, so a run ends before planning starts). A review that becomes final
+inside that window waits until the deadline has passed, and is worked on then unless the next
+gameweek's review is final first. To switch it off, set `FPL_SELF_IMPROVE=off` in the environment
+of the scheduled task (for cron, put `FPL_SELF_IMPROVE=off` before the command).
 
 What Discord tells you about a scheduled run:
 
