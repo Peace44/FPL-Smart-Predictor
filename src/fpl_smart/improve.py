@@ -297,9 +297,9 @@ def _closest(outcomes: list[Outcome]) -> str:
             f"{t.primary.diff:+.4f} {t.primary.metric})") if t else ""
 
 
-def unchanged(f: str, outcomes: list[Outcome]) -> str:
+def unchanged(outcomes: list[Outcome]) -> str:
     """Why no setting changed. Only when every test ran is the limit known to be in the code."""
-    ran =[o for o in outcomes if not o.skipped]
+    ran = [o for o in outcomes if not o.skipped]
     skipped = "; ".join(f"{o.experiment}: {o.skipped.rstrip('.')}" for o in outcomes if o.skipped)
     if not ran:
         return f"No test could run ({skipped}), so it is not known whether a setting would help."
@@ -329,7 +329,7 @@ def result_lines(f: str, outcomes: list[Outcome], adopted: Trial | None, brief: 
         L = [f"Changed {adopted.knob} {adopted.old:g} → {adopted.new:g} ({adopted.primary.metric} better by "
              f"{adopted.primary.z:.1f} s.e.). Nothing for you to do."]
     else:
-        L = [unchanged(f, outcomes)] + ([aim(f, cert, list(found))] if cert is not None else []) + [
+        L = [unchanged(outcomes)] +([aim(f, cert, list(found))] if cert is not None else []) + [
              f"A brief for a code change is in {brief}. To act on it, run /fpl-improve in Claude Code "
              "(optional: the autopilot carries on with the current settings either way)."]
     L += [f"GW{g} was never worked on: {why}." for g, why in skipped]
@@ -505,7 +505,7 @@ def render(gw, path, data, f, avg, win, outcomes, adopted, change, dry_run, cert
         if change:
             L.append("The next plan uses it. The next reviews show whether the factor it targets improves.")
     else:
-        L.append(unchanged(f, outcomes))
+        L.append(unchanged(outcomes))
         found = list(found)
         L += ["", "## Needs a code change", "",
               "For the `fpl-improve` skill (run /fpl-improve in Claude Code) or you to implement on a branch, test with "
