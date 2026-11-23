@@ -100,6 +100,7 @@ def test_a_kept_change_waits_on_its_branch_and_the_session_sees_no_secrets(repo,
     assert "improve/gw11-auto" in seen["prompt"]
     assert seen["args"][seen["args"].index("--permission-mode") + 1] == "dontAsk"
     assert "Bash(git push*)" in seen["args"] and "Bash(.venv/bin/fpl apply*)" in seen["args"]
+    assert f"Read(/{codechange.ROOT}/data/auth/**)" in seen["args"] and f"Edit(/{codechange.ROOT}/**)" in seen["args"]
     assert seen["webhook"] is None and seen["token"] is None and seen["env_file"] == "FPL_TEAM_ID=123\n"
     assert seen["pythonpath"] == str(base / "improve-gw11-auto" / "src") and seen["cwd"] == str(base / "improve-gw11-auto")
     assert not seen["auth"] and seen["raw_link"] and seen["brief"]

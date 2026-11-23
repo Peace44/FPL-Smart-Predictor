@@ -79,6 +79,9 @@ DENIED = [
     "Bash(git worktree*)", "Bash(git -C*)", "Bash(.venv/bin/fpl apply*)", "Bash(.venv/bin/fpl auto*)",
     "Bash(.venv/bin/fpl plan*)", "Bash(.venv/bin/fpl login*)", "Bash(.venv/bin/fpl improve*)",
     "WebFetch", "WebSearch",
+    # Read-only shell commands (cat, wc...) need no allow rule, so the sign-in and the keys are denied by
+    # path, and the main working tree is out of bounds for edits ("//" starts an absolute path).
+    f"Read(/{ROOT}/data/auth/**)", f"Read(/{ROOT}/.env)", f"Edit(/{ROOT}/**)", f"Write(/{ROOT}/**)",
 ]
 
 PROMPT = """/fpl-improve reports/gw{gw:02d}_review.md
