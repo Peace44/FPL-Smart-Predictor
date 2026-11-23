@@ -332,10 +332,23 @@ After every run that planned or changed something:
   - a check with nothing to do yet, at most every six hours, so you can see the schedule is alive;
   - each finished gameweek: points, the game average, overall rank and how far it moved;
   - each gameweek review, with its limiting factor, and each self-improvement run's result or
-    failure (see *The weekly review and self-improvement*).
+    failure (see *The weekly review and self-improvement*);
+  - the start of a new season.
 
   `reports/auto.log` records whether each report was delivered. Anyone who has the webhook
   address can post to the channel, so keep it out of anything you share.
+
+## A new season
+
+FPL numbers the gameweeks from 1 again each season. On the first run of `fpl auto`, `plan`,
+`apply`, `review` or `improve` after FPL starts a new season, last season's per-gameweek files move
+to `reports/<last season>/`. Those are the `gwNN/` folders, the reviews, the self-improvement briefs
+and the records of which gameweek was last reported, reviewed and worked on. The autopilot, the
+reviews and self-improvement then start afresh; tuned settings in `tuning/` carry over.
+
+The season constants in `src/fpl_smart/config.py` (`CURRENT_SEASON`, `PAST_SEASONS`) are still
+moved on by hand. The new-season Discord report says when they are behind, and `reports/auto.log`
+repeats it on every run until they are updated.
 
 ## Development
 
@@ -352,4 +365,5 @@ points model's walk-forward accuracy gameweek by gameweek (z-scores per season).
 
 Layout: `src/fpl_smart/` is the package, `tests/` the test suite, `tuning/` the self-tuned settings
 and their ledger (committed), `scripts/` evaluation and tuning scripts, `data/` caches (not
-committed), `reports/` generated plans and reviews (not committed).
+committed), `reports/` generated plans and reviews, with past seasons in `reports/<season>/` (not
+committed).

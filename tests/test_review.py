@@ -279,3 +279,15 @@ def test_a_manual_run_is_not_caught(state, monkeypatch):
     monkeypatch.setattr(improve, "_run", boom)
     with pytest.raises(ValueError):
         improve.run(str(review), log=lambda *_: None)
+
+
+def test_a_review_with_no_limiting_factor_is_done_when_scheduled(state, monkeypatch):
+    review = state / "gw10_review.md"
+    review.write_text("")
+    monkeypatch.setattr(gwreview, "parse", lambda text: {"gw": 10, "final": True, "engine_managed": False})
+    monkeypatch.setattr(gwreview, "load_reviews", lambda: [])
+    quiet = dict(log=lambda *_: None)
+    assert improve.run(str(review), **quiet) == 2                  # by hand: say there is nothing to do
+    assert "done_gw" not in improve._state()
+    assert improve.run(str(review), if_due=True, **quiet) == 0      # scheduled: done, not retried every run
+    assert improve._state()["done_gw"] == 10

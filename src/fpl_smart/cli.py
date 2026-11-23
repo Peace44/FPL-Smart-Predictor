@@ -355,9 +355,19 @@ def build_parser() -> argparse.ArgumentParser:
     return ap
 
 
+# Commands that read or write what is kept per gameweek in reports/: a new season moves last season's first.
+SEASONAL = {"plan", "review", "improve", "auto", "apply"}
+
+
 def main(argv: list[str] | None = None) -> int:
     warnings.filterwarnings("ignore")
     a = build_parser().parse_args(argv)
+    if a.cmd in SEASONAL:
+        from . import season
+        try:
+            season.rollover(log=_log)
+        except Exception as e:  # noqa: BLE001  (no network: the command itself will say so)
+            _log(f"could not check for a new season: {e!r}")
     return a.fn(a)
 
 

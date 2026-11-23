@@ -245,6 +245,16 @@ def _save_state(**kw) -> None:
     STATE.write_text(json.dumps({**_state(), **kw}))
 
 
+def _mark_done(gw: int) -> None:
+    """Record `gw` as worked on. Never backwards: a run on an older review by hand does not make the
+    scheduler redo newer ones."""
+    st = _state()
+    st.pop("failed", None)
+    st.update(done_gw=max(gw, st.get("done_gw", 0)), when=str(pd.Timestamp.now(tz="UTC").floor("s")))
+    REPORTS.mkdir(parents=True, exist_ok=True)
+    STATE.write_text(json.dumps(st))
+
+
 def missed(gw: int) -> list[tuple[int, str]]:
     """Gameweeks after the last one worked on and before `gw` that no run worked on, each with why.
     None before the first run: earlier reviews may be ones written by hand to fill in the history."""
@@ -345,14 +355,15 @@ def run(review: str | None = None, dry_run: bool = False, factor: str | None = N
     path = Path(review) if review else None
     try:
         path = path or due(log)
-        return 0 if path is None else _run(path, dry_run, factor, heavy, budget_min, log)
+        return 0 if path is None else _run(path, dry_run, factor, heavy, budget_min, log, scheduled=True)
     except Exception as e:  # noqa: BLE001  (unattended: say so on Discord; auto.sh only writes the log)
         log("improve: the run failed\n" + traceback.format_exc().rstrip())
         failed(path, e, log)
         return 1
 
 
-def _run(path: Path, dry_run: bool, factor: str | None, heavy: bool, budget_min: float, log) -> int:
+def _run(path: Path, dry_run: bool, factor: str | None, heavy: bool, budget_min: float, log,
+         scheduled: bool = False) -> int:
     text = path.read_text()
     data = gwreview.parse(text)
     if data is None:
@@ -364,7 +375,12 @@ def _run(path: Path, dry_run: bool, factor: str | None, heavy: bool, budget_min:
     f, avg = gwreview.choose_factor(win, (data.get("operations") or {}).get("points_lost", 0.0))
     f = factor or f or data.get("limiting_factor")
     if f is None:
-        log("the review has no limiting factor (no comparison with the top managers was possible)")
+        why = "the review has no limiting factor (no recent week the engine managed could be compared with the top managers)"
+        if scheduled and not dry_run:            # nothing to work on this week: not a failure to repeat every run
+            _mark_done(gw)
+            log(f"improve: GW{gw}: {why}; nothing to work on")
+            return 0
+        log(why)
         return 2
     log(f"GW{gw}: limiting factor {f}" + (f" (average {avg[f]:+.1f} behind the top 50 over {len(win)} GW)" if f in avg else ""))
 
@@ -410,10 +426,7 @@ def _run(path: Path, dry_run: bool, factor: str | None, heavy: bool, budget_min:
             log(f"improve: GW{g} was never worked on: {why}")
         out.write_text(report)
         tuning.append_ledger(_ledger(gw, f, avg, outcomes, adopted, change, skipped))
-        st = _state()
-        st.pop("failed", None)
-        st.update(done_gw=max(gw, st.get("done_gw", 0)), when=str(pd.Timestamp.now(tz="UTC").floor("s")))
-        STATE.write_text(json.dumps(st))
+        _mark_done(gw)
         notify.publish({out.name: report})
         _report(log, f"GW{gw} self-improvement: {f}", result_lines(f, outcomes, adopted, f"reports/{out.name}", skipped),
                 kind="ok" if adopted else "info")
