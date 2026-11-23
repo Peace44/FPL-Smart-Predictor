@@ -20,6 +20,7 @@ from . import history, market
 from . import minutes as MN
 from . import player_model as PM
 from . import team_model as TM
+from . import tuning
 from . import xp as xp_mod
 from .config import CURRENT_SEASON, PROCESSED
 from .my_team import MAX_FT, TeamState, selling_price
@@ -62,16 +63,25 @@ def _minutes_model(ms: pd.DataFrame, season: str, start: pd.Timestamp) -> MN.Min
 
 def project_season(season: str, horizon: int = 8, first_gw: int = 1, last_gw: int = 38,
                    use_cache: bool = True, log=lambda m: None) -> dict[int, GWData]:
-    """Walk-forward projections for every gameweek of `season` (cached on disk)."""
-    cache = PROCESSED / f"backtest_{season}_h{horizon}.pkl"
+    """Walk-forward projections for every gameweek of `season` (cached on disk, per set of tuned
+    model settings). For the season in progress the cache is rebuilt once newer gameweeks exist."""
+    fp = tuning.fingerprint()
+    cache = PROCESSED / (f"backtest_{season}_h{horizon}" + (f"_{fp}" if fp else "") + ".pkl")
+    m = None
     if use_cache and cache.exists():
         with open(cache, "rb") as f:
             out = pickle.load(f)
-        if all(g in out for g in range(first_gw, min(last_gw, max(out)) + 1)):
+        complete = all(g in out for g in range(first_gw, min(last_gw, max(out)) + 1))
+        if complete and season == CURRENT_SEASON:
+            m = history.build_matches(max_age_h=12.0)
+            played = m.loc[m["season"] == season, "gw"]
+            complete = len(played) == 0 or max(out) >= min(last_gw, int(played.max()))
+        if complete:
             return {g: d for g, d in out.items() if first_gw <= g <= last_gw}
 
-    params, tp = PM.PlayerParams(), TM.TeamParams()
-    m = history.load_matches() if season != CURRENT_SEASON else history.build_matches(max_age_h=12.0)
+    params, tp = tuning.player_params(), tuning.team_params()
+    if m is None:
+        m = history.load_matches() if season != CURRENT_SEASON else history.build_matches(max_age_h=12.0)
     tm = market.attach_market(history.team_matches(m))
     seasons = [s for s in sorted(tm["season"].unique()) if "2023-24" <= s <= season]
     twf = TM.walk_forward(tm, seasons, tp)
@@ -127,7 +137,8 @@ def project_season(season: str, horizon: int = 8, first_gw: int = 1, last_gw: in
 # ----------------------------------------------------------------------------- simulation
 def options_for(strategy: str, base: SolverOptions | None = None) -> tuple[SolverOptions, int | None]:
     """Solver options and horizon override for a named strategy."""
-    base = replace(base or SolverOptions(), use_chips=False, chips=[], time_limit=25, gap=0.004, threads=1)
+    base = replace(base or SolverOptions(**tuning.solver_values()), use_chips=False, chips=[], time_limit=25,
+                   gap=0.004, threads=1)
     if strategy == "plan":
         return base, None
     if strategy == "myopic":        # only ever looks at the next gameweek

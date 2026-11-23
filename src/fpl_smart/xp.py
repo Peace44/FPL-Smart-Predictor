@@ -37,7 +37,7 @@ def project_core(ms: pd.DataFrame, players: pd.DataFrame, fixtures: pd.DataFrame
                  cal: PM.Calibration, mm: MN.MinutesModel, params: PM.PlayerParams | None = None,
                  scoring: dict | None = None, defcon: bool = True,
                  avail: pd.DataFrame | None = None, fit_blend: pd.Series | None = None,
-                 unflagged: pd.Series | None = None) -> pd.DataFrame:
+                 unflagged: pd.Series | None = None, miss_cut: float | None = None) -> pd.DataFrame:
     """Per player-fixture expected points.
 
     ms: prepared history (minutes.add_state + player_model.prepare, bonus residuals filled).
@@ -47,6 +47,10 @@ def project_core(ms: pd.DataFrame, players: pd.DataFrame, fixtures: pd.DataFrame
     fit_blend: optional per-player weight in [0, 1]; where > 0 the minutes prediction is blended
         towards "as he played before his current absence" (used for flagged/returning players).
     unflagged: optional per-player bool; True = FPL shows no injury/suspension flag (see below).
+    miss_cut: share of an unflagged regular's risk of missing the next match that the missing flag
+        removes (default UNFLAGGED_MISS_CUT; tuned values come from tuning.availability()).
+    The result keeps `p_play_base` (before the flag adjustments), `clear` and `avail`, so the
+    gameweek review can check, and `fpl improve` re-fit, how the flags were used.
     """
     params = params or PM.PlayerParams()
     past = ms[ms["kickoff"] < when]
@@ -82,14 +86,18 @@ def project_core(ms: pd.DataFrame, players: pd.DataFrame, fixtures: pd.DataFrame
         w = w * np.isin(d["code"].to_numpy(), has)[:, None]
         mins = pd.DataFrame(w * np.maximum(fit.to_numpy(), mins.to_numpy()) + (1 - w) * mins.to_numpy(),
                             index=mins.index, columns=mins.columns)
+    base = mins["p_play"].to_numpy().copy()
+    clear = np.zeros(len(d), dtype=bool)
     if unflagged is not None:
-        mins = _unflagged_uplift(mins, unflagged.reindex(d["pid"]).fillna(False).to_numpy(dtype=bool),
-                                 d["h"].to_numpy())
+        clear = unflagged.reindex(d["pid"]).fillna(False).to_numpy(dtype=bool)
+        mins = _unflagged_uplift(mins, clear, d["h"].to_numpy(),
+                                 UNFLAGGED_MISS_CUT if miss_cut is None else miss_cut)
+    a = np.ones(len(d))
     if avail is not None:
         a = np.array([avail.at[p, g] if (p in avail.index and g in avail.columns) else 1.0
                       for p, g in zip(d["pid"], d["gw"])])
         mins = mins.mul(a, axis=0)
-    d = pd.concat([d, mins], axis=1)
+    d = pd.concat([d, mins.assign(p_play_base=base, clear=clear, avail=a)], axis=1)
 
     S = PM.state_asof(ms, when, params.hl_days)
     S = S.reindex(d["code"].to_numpy()).fillna(0.0)
@@ -104,15 +112,22 @@ def project_core(ms: pd.DataFrame, players: pd.DataFrame, fixtures: pd.DataFrame
 UNFLAGGED_MISS_CUT = 0.45  # share of a regular starter's absences that FPL flags before the deadline
 
 
-def _unflagged_uplift(mins: pd.DataFrame, clear: np.ndarray, h: np.ndarray) -> pd.DataFrame:
+def unflagged_play(p: np.ndarray, clear: np.ndarray, h: np.ndarray, miss_cut: float = UNFLAGGED_MISS_CUT) -> np.ndarray:
+    """P(plays) once a missing injury flag is taken into account (see _unflagged_uplift)."""
+    p = np.asarray(p, dtype=float)
+    nailed = np.clip((p - 0.5) / 0.4, 0, 1)
+    fade = np.clip(1.0 - 0.25 * (np.asarray(h, dtype=float) - 1), 0, 1)
+    cut = miss_cut * nailed * fade * np.asarray(clear, dtype=bool)
+    return 1 - (1 - p) * (1 - cut)
+
+
+def _unflagged_uplift(mins: pd.DataFrame, clear: np.ndarray, h: np.ndarray,
+                      miss_cut: float = UNFLAGGED_MISS_CUT) -> pd.DataFrame:
     """The minutes model never saw injury news, so its P(plays) averages over flagged and unflagged
     players. Knowing a regular starter carries no flag removes a good part of his risk of missing
     the *next* match; the effect fades for later matches and for rotation players."""
     p = mins["p_play"].to_numpy()
-    nailed = np.clip((p - 0.5) / 0.4, 0, 1)
-    fade = np.clip(1.0 - 0.25 * (h - 1), 0, 1)
-    cut = UNFLAGGED_MISS_CUT * nailed * fade * clear
-    new_p = 1 - (1 - p) * (1 - cut)
+    new_p = unflagged_play(p, clear, h, miss_cut)
     scale = np.divide(new_p, p, out=np.ones_like(p), where=p > 1e-9)
     out = mins.copy()
     out["p_play"] = new_p
@@ -174,7 +189,14 @@ def parse_return_date(news: str, now: pd.Timestamp) -> pd.Timestamp | None:
         return None
 
 
-def availability(el: pd.DataFrame, gw_dates: dict[int, pd.Timestamp], now: pd.Timestamp) -> pd.DataFrame:
+def doubtful_chance(c: float, scale: float = 1.0) -> float:
+    """FPL's "c chance of playing" for a doubtful player, read with `scale` (1 = at face value,
+    below 1 = he plays more often than FPL's number says)."""
+    return float(min(1.0, max(0.0, 1.0 - (1.0 - c) * scale)))
+
+
+def availability(el: pd.DataFrame, gw_dates: dict[int, pd.Timestamp], now: pd.Timestamp,
+                 doubtful_scale: float = 1.0) -> pd.DataFrame:
     """Probability each player is available for each gameweek, from FPL status flags and news."""
     gws = sorted(gw_dates)
     out = pd.DataFrame(1.0, index=el.index, columns=gws)
@@ -199,6 +221,8 @@ def availability(el: pd.DataFrame, gw_dates: dict[int, pd.Timestamp], now: pd.Ti
                     k += 1
             continue
         c = 0.0 if c is None and status in ("i", "s", "n") else (0.75 if c is None else c)
+        if status not in ("s", "n") and 0.0 < c < 1.0:
+            c = doubtful_chance(c, doubtful_scale)
         for k, g in enumerate(gws):
             if status in ("s", "n"):
                 out.at[pid, g] = c if k == 0 else 1.0
@@ -221,7 +245,9 @@ def _minutes_model(ms: pd.DataFrame, tag: str, retrain: bool = False) -> MN.Minu
 
 def project_live(horizon: int = 8, use_odds: bool = True, refresh: bool = True,
                  params: PM.PlayerParams | None = None, team_params: TM.TeamParams | None = None) -> Projection:
-    params, team_params = params or PM.PlayerParams(), team_params or TM.TeamParams()
+    from . import tuning
+    params, team_params = params or tuning.player_params(), team_params or tuning.team_params()
+    av = tuning.availability()
     now = pd.Timestamp.now(tz="UTC")
     bs = fpl_api.bootstrap(0.0 if refresh else 6.0)
     fx = pd.DataFrame(fpl_api.fixtures(0.0 if refresh else 6.0))
@@ -265,7 +291,7 @@ def project_live(horizon: int = 8, use_odds: bool = True, refresh: bool = True,
         "value": el["now_cost"].astype(float), "own_rel": sel / max(sel.max(), 1e-9),
     })
     gw_dates = tf.groupby("gw")["kickoff"].min().to_dict()
-    avail = availability(el, gw_dates, now)
+    avail = availability(el, gw_dates, now, av["doubtful_scale"])
 
     # Flagged players, and players whose flag was cleared in the last fortnight, are judged on how
     # they were used before the absence (the flag itself carries the availability risk).
@@ -278,7 +304,7 @@ def project_live(horizon: int = 8, use_odds: bool = True, refresh: bool = True,
     clear = (el["status"] == "a") & (el["chance_of_playing_next_round"].isna()
                                      | (el["chance_of_playing_next_round"] >= 100))
     detail = project_core(ms, players, tf, now, cal, mm, params, scoring=bs["game_config"]["scoring"],
-                          avail=avail, fit_blend=fit_blend, unflagged=clear)
+                          avail=avail, fit_blend=fit_blend, unflagged=clear, miss_cut=av["unflagged_miss_cut"])
     xp = detail.pivot_table(index="pid", columns="gw", values="xp", aggfunc="sum").reindex(el.index).fillna(0.0)
     xp = xp.reindex(columns=range(nxt, last_gw + 1), fill_value=0.0)
 
@@ -293,5 +319,6 @@ def project_live(horizon: int = 8, use_odds: bool = True, refresh: bool = True,
     nx = detail[detail["gw"] == nxt].groupby("pid").agg(p60=("p60", "max"), emin=("emin", "sum"))
     out = out.join(nx)
     tf["team"], tf["opp"] = tf["team_code"].map(short), tf["opp_code"].map(short)
-    info = {"odds": odds_info, "minutes_model": tag, "generated": str(now), "calibration": cal}
+    info = {"odds": odds_info, "minutes_model": tag, "generated": str(now), "calibration": cal,
+            "tuning": tuning.load()}
     return Projection(out, xp, detail, tf, ratings, nxt, info)

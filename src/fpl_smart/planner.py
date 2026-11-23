@@ -8,7 +8,7 @@ from dataclasses import dataclass, field, replace
 
 import pandas as pd
 
-from . import fpl_api, my_team, optimise, xp as xp_mod
+from . import fpl_api, my_team, optimise, tuning, xp as xp_mod
 from .config import PROCESSED, REPORTS, team_id
 from .my_team import TeamState
 from .solver import Plan, SolverOptions, hold_value, solve
@@ -96,7 +96,7 @@ def make(horizon: int | None = None, ft: int | None = None, use_chips: bool = Tr
     with open(PROCESSED / "projection.pkl", "wb") as f:
         pickle.dump(P, f)
 
-    opt = SolverOptions(use_chips=use_chips, max_hits_per_gw=max_hits,
+    opt = SolverOptions(**tuning.solver_values(), use_chips=use_chips, max_hits_per_gw=max_hits,
                         banned=tuple(resolve_players(banned, P.players)),
                         locked=tuple(resolve_players(locked, P.players)))
     hold = hold_value(P.xp, P.players, state, H, opt)
@@ -155,4 +155,27 @@ def save(rec: Recommendation, text: str) -> dict:
     js = d / f"plan-{stamp}.json"
     js.write_text(json.dumps(record, indent=1))
     (d / "latest.json").write_text(json.dumps(record, indent=1))
-    return {"markdown": md, "json": js, "latest": REPORTS / "latest.md"}
+    snap = d / f"projection-{stamp}.parquet"
+    try:
+        snapshot(rec.projection).to_parquet(snap)
+    except Exception:  # noqa: BLE001  (the review can do without it; the plan must still be saved)
+        snap = None
+    return {"markdown": md, "json": js, "latest": REPORTS / "latest.md", "projection": snap}
+
+
+SNAPSHOT_PLAYER_COLS = ["name", "team", "price", "own", "status", "chance", "news", "ep_next"]
+
+
+def snapshot(P: xp_mod.Projection) -> pd.DataFrame:
+    """The projection for the gameweek about to be played, one row per player per fixture, with what
+    FPL said about each player at the time. The gameweek review compares it with what happened."""
+    d = P.detail[P.detail["gw"] == P.next_gw].copy()
+    info = P.players[[c for c in SNAPSHOT_PLAYER_COLS if c in P.players]]
+    d = d.join(info, on="pid")
+    opp = P.fixtures.drop_duplicates(["fixture", "team_code"]).set_index(["fixture", "team_code"])["opp"]
+    d["opp"] = [opp.get((f, t), "?") for f, t in zip(d["fixture"], d["team_code"])]
+    d["generated"] = str(P.info.get("generated", ""))
+    for c in ("news", "status", "name", "team", "opp", "season", "generated"):
+        if c in d:
+            d[c] = d[c].fillna("").astype(str)
+    return d.reset_index(drop=True)

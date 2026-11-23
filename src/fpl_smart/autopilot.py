@@ -220,6 +220,24 @@ def result_report(bs: dict, log=print) -> bool:
     return False
 
 
+def review_step(bs: dict, log=print) -> bool:
+    """Once per checked gameweek: write reports/gwNN_review.md (rewriting a provisional one) and say so.
+    Marked done only once written, so a failure is retried on the next run."""
+    from . import gwreview
+    done = [e for e in bs["events"] if e.get("finished") and e.get("data_checked")]
+    if not done:
+        return False
+    gw = max(e["id"] for e in done)
+    if _state().get("reviewed_gw", 0) >= gw:
+        return False
+    path, rv, text = gwreview.write(gw, log=log)
+    _save_state(reviewed_gw=gw)
+    log(f"GW{gw} review written to {path}")
+    notify.publish({path.name: text[: text.rfind(gwreview.DATA_OPEN)]})
+    _report(log, f"GW{gw} review", gwreview.summary_lines(rv), kind="info")
+    return True
+
+
 def overspent(spent: int, gw: int, s: Settings) -> str | None:
     """More points spent on this gameweek's transfers than the autopilot may spend on its own.
     It is read from the account on every run, so it is reported until it is put right and not only
@@ -285,6 +303,10 @@ def _run(force: bool, dry_run: bool, quick: bool, apply_now: bool, log) -> int:
             result_report(bs, log)
         except Exception as e:  # noqa: BLE001  (a report must never stop the run that manages the team)
             log(f"could not send the gameweek result: {e!r}")
+        try:
+            review_step(bs, log)
+        except Exception as e:  # noqa: BLE001
+            log(f"could not write the gameweek review: {e!r}")
     if not force and not apply_now and left > s.plan_within_h:
         log(f"GW{gw} deadline is {left / 24:.1f} days away; nothing to do")
         problem = idle_check(account, gw, deadline, left, now, s, log=log)

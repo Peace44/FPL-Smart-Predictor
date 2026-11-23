@@ -33,7 +33,9 @@ Without an odds key the tool still works, using its own team ratings for every f
 | `fpl team` | Your squad with selling prices and projected points |
 | `fpl top --pos MID -n 20` | Best projected players (`--max-price`, `--team`, `--value`) |
 | `fpl player Haaland` | One player's projection per fixture, split into goals, assists, clean sheets, bonus... |
-| `fpl review` | How past recommendations scored, next to your real score and the game average |
+| `fpl review` | The gameweek review in `reports/gwNN_review.md`: result against projection, progress towards first place, the limiting factor (`--gw N`; `--history` for the old table of past plans) |
+| `fpl improve` | Read the latest final review and test changes to the settings behind its limiting factor; keep one only if it is clearly better (`--dry-run`, `--revert ID`) |
+| `fpl evaluate` | Walk-forward accuracy of the points model; `--save NAME` / `--against NAME` compare two versions of the code |
 | `fpl backtest --season 2025-26` | Replay the optimiser over a finished season |
 | `fpl auto` | Unattended mode: plan when a deadline is near and, if allowed, update your team (for a scheduler) |
 | `fpl apply` | Plan now and carry the plan out on your FPL account (`--dry-run` shows the requests without sending them) |
@@ -114,13 +116,67 @@ Known limits:
 - Bookmaker odds usually cover only the next one or two gameweeks.
 - The engine knows FPL's injury flags but not press-conference news or predicted line-ups.
 - Free transfers are inferred, not read (see `--ft`), unless a sign-in is set up.
-- It does not learn from its own results. Every run refits the team ratings, player rates and
-  calibration on all matches played so far, and the minutes model is retrained after each
-  gameweek, so the projections keep up with the season. The settings behind them (decay rates,
-  horizon weights, chip reserves) are fixed; they were chosen by replaying past seasons with the
-  scripts under *Development*, and `fpl review` only reports how past plans scored.
+- Every run refits the team ratings, player rates and calibration on all matches played so far,
+  and the minutes model is retrained after each gameweek, so the projections keep up with the
+  season. The settings behind them change only through the weekly review loop (see *The weekly
+  review and self-improvement*), one step at a time and only on clear evidence. Chip reserves are
+  not tuned by it, because the replays leave chips out.
 - It maximises expected points. It does not yet weigh ownership (differentials against
   template picks) when you are chasing or protecting rank.
+
+## The weekly review and self-improvement
+
+When a gameweek's data is final, the autopilot writes **`reports/gwNN_review.md`** (also copied to
+`Documents\FPL` and announced on Discord). Run `fpl review` to write one yourself. A review written
+before FPL has checked the data is marked provisional and is rewritten later. It covers:
+
+- **Against the projection:** each player's projected and actual points, and where the team's gap
+  came from (minutes, goals, assists, clean sheets, bonus...). It separates finishing luck (chances
+  created but not scored) from the model's error (chances that were never there). It also gives the
+  hindsight numbers: best eleven from the same 15, best captain, and what the squad from before the
+  week's moves would have scored.
+- **The model across all players:** bias and correlation against FPL's own projection, calibration of
+  P(plays), regulars who did not play, the ten highest projections, and team expected goals against
+  the chances teams created.
+- **Towards first place:** points of first place and the top 100 / 1k / 10k / 100k / 1M, the gap and
+  the points a week needed to close it, the season so far, and milestones. It also compares your week
+  with the top 50 managers as they stood before the gameweek: their captains, the players most of
+  them owned that you did not, and your differentials.
+- **What can be improved:** the gap to the top 50 split into five parts that add up exactly: squad
+  (best possible eleven), selection (left on the bench), captaincy, chips and hits. The part with the
+  largest average gap over the last six engine-managed gameweeks is the **limiting factor**. An
+  autopilot mishap that cost points comes first. Below that are plain observations, each tied to
+  what could change it.
+- **Your notes:** anything you write under that heading is kept when the review is rewritten, and
+  the self-improvement skill reads it.
+
+**`fpl improve`** takes the latest final review and works on its limiting factor. One week of
+points is mostly luck, so the review only chooses where to look. Each candidate setting is one step
+up or down for one knob in `tuning.KNOBS` (player and team ratings, availability, optimiser). It is
+replayed walk-forward over the last two seasons and this one, gameweek by gameweek, against the
+settings in effect. A setting is kept only if it beats the current value by three standard errors
+without the guard measure or the current season getting worse. At most one setting changes per run.
+Kept values go to `tuning/params.json`, the live code reads them from there, and `tuning/ledger.md`
+records every run. `fpl improve --revert ID` undoes a change. The experiments behind each factor:
+
+| Factor | Tested first | Then |
+|---|---|---|
+| squad | points model: accuracy of every likely starter | optimiser replay (about 30 minutes) |
+| selection | points model | availability: P(plays) against who played, from the projections saved before each deadline (needs three gameweeks of them) |
+| captaincy | points model at the top end: actual points of each week's ten best projections | |
+| hits | optimiser replay | |
+| chips, operations | (no setting covers them) | |
+
+When no setting passes, the limit is in the code. The run then writes a brief for a code change in
+`reports/gwNN_improvement.md`. The Claude Code skill **`/fpl-improve`**
+(`.claude/skills/fpl-improve/SKILL.md`) works from that brief: it implements the most promising
+untried idea on a branch, proves it with `fpl evaluate --against` and the tests, records the result in
+the ledger, and asks before merging. When a review missed something, the skill also extends what the
+review measures.
+
+`scripts/auto.sh` runs `fpl improve --if-due` after each check. It works on a new final review
+only, and only while the next deadline is more than 50 hours away. `FPL_SELF_IMPROVE=off` in the
+environment of the scheduled task switches it off.
 
 ## Letting it act for you
 
@@ -259,7 +315,8 @@ After every run that planned or changed something:
   - every run that planned or acted: what it did, the plan, the line-up, anything that needs you;
   - a run that failed, and a sign-in that has expired;
   - a check with nothing to do yet, at most every six hours, so you can see the schedule is alive;
-  - each finished gameweek: points, the game average, overall rank and how far it moved.
+  - each finished gameweek: points, the game average, overall rank and how far it moved;
+- each gameweek review, with its limiting factor, and each self-improvement run's result.
 
   `reports/auto.log` records whether each report was delivered. Anyone who has the webhook
   address can post to the channel, so keep it out of anything you share.
@@ -274,5 +331,9 @@ After every run that planned or changed something:
 .venv/bin/python scripts/tune_optimiser.py       # compare optimiser settings on past seasons
 ```
 
-Layout: `src/fpl_smart/` is the package, `tests/` the test suite, `scripts/` evaluation and
-tuning scripts, `data/` caches (not committed), `reports/` generated plans (not committed).
+`fpl evaluate --save before` and, after a code change, `fpl evaluate --against before` compare the
+points model's walk-forward accuracy gameweek by gameweek (z-scores per season).
+
+Layout: `src/fpl_smart/` is the package, `tests/` the test suite, `tuning/` the self-tuned settings
+and their ledger (committed), `scripts/` evaluation and tuning scripts, `data/` caches (not
+committed), `reports/` generated plans and reviews (not committed).

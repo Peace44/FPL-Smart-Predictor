@@ -5,7 +5,9 @@
     fpl top         best projected players
     fpl player      one player's projection, broken into components
     fpl backtest    replay the optimiser over a past season
-    fpl review      how past recommendations scored, next to your actual points
+    fpl review      the gameweek review: projection vs result, progress to first place, what to improve
+    fpl improve     read the latest review and test changes to the setting behind its limiting factor
+    fpl evaluate    walk-forward accuracy of the points model (compare code versions with --save/--against)
     fpl auto        unattended mode: plan near a deadline and, if allowed, act on the account
     fpl apply       plan now and carry it out on the account (--dry-run shows the requests only)
     fpl login       check the FPL sign-in and show what FPL says about the team
@@ -144,6 +146,22 @@ def cmd_backtest(a) -> int:
 
 
 def cmd_review(a) -> int:
+    """Write the gameweek review (reports/gwNN_review.md); --history: the older table of past plans."""
+    if not a.history:
+        from . import gwreview
+        try:
+            path, rv, text = gwreview.write(a.gw, log=_log)
+        except (RuntimeError, KeyError) as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+        if a.print:
+            print(text[: text.rfind(gwreview.DATA_OPEN)])
+        _log(f"{'final' if rv.final else 'provisional'} review written to {path}")
+        return 0
+    return _review_history()
+
+
+def _review_history() -> int:
     """How past recommendations did: their line-ups scored with actual points, next to what you scored."""
     import json
 
@@ -177,6 +195,39 @@ def cmd_review(a) -> int:
     both = t.dropna(subset=["your team"])
     print(f"\nTotal over {len(both)} gameweek(s): recommended {int(both['recommended team'].sum())}, "
           f"yours {int(both['your team'].sum())}, average {int(both['game average'].sum())}")
+    return 0
+
+
+def cmd_improve(a) -> int:
+    from . import improve, tuning
+    if a.revert is not None:
+        try:
+            ch = tuning.revert(a.revert)
+        except ValueError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+        tuning.append_ledger([f"## Revert ({pd.Timestamp.now(tz='UTC'):%Y-%m-%d})",
+                              f"- Result: change #{ch['id']} {ch['key']} {ch['old']:g} → {ch['new']:g} (undoes #{a.revert})"])
+        print(f"{ch['key']} is back to {ch['new']:g} (change #{ch['id']}).")
+        return 0
+    return improve.run(a.review, dry_run=a.dry_run, factor=a.factor, heavy=not a.light, if_due=a.if_due, log=_log)
+
+
+def cmd_evaluate(a) -> int:
+    """Walk-forward accuracy of the current code and settings; --save / --against compare two versions."""
+    from . import evaluate as ev
+    b = ev.base(refresh=not a.no_refresh, log=_log)
+    df = ev.points_model(b)
+    _show(ev.summary(df).round(4))
+    if a.save:
+        _log(f"saved {ev.save_run(df, a.save)}")
+    if a.against:
+        ref = ev.load_run(a.against)
+        print(f"\nAgainst '{a.against}' (positive = better now; z = difference / standard error, paired by gameweek):")
+        for m in ("mse_rel", "corr_rel", "top30", "top10"):
+            c = ev.compare(ref, df, m)
+            seasons = ", ".join(f"{s} {v['z']:+.1f}" for s, v in c.by_season.items() if v["z"] == v["z"])
+            print(f"  {m:<9} {c.diff:+.4f}  z {c.z:+.1f}  over {c.n} GW  ({seasons})")
     return 0
 
 
@@ -258,8 +309,29 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--workers", type=int)
     p.set_defaults(fn=cmd_backtest)
 
-    p = sub.add_parser("review", help="how past recommendations scored, next to your actual points")
+    p = sub.add_parser("review", help="write the gameweek review to reports/gwNN_review.md")
+    p.add_argument("--gw", type=int, help="gameweek to review (default: the latest one played)")
+    p.add_argument("--print", action="store_true", help="also print the review")
+    p.add_argument("--history", action="store_true",
+                   help="instead: how every saved recommendation scored, next to your actual points")
     p.set_defaults(fn=cmd_review)
+
+    p = sub.add_parser("improve", help="read the latest final review and test changes to its limiting factor")
+    p.add_argument("review", nargs="?", help="review file (default: the latest final one)")
+    p.add_argument("--dry-run", action="store_true", help="test and report, change nothing")
+    p.add_argument("--factor", choices=["squad", "selection", "captaincy", "chips", "hits", "operations"],
+                   help="work on this factor instead of the review's")
+    p.add_argument("--light", action="store_true", help="skip the optimiser replay (the slow experiment)")
+    p.add_argument("--if-due", action="store_true",
+                   help="for the scheduler: only for a new final review, and not close to a deadline")
+    p.add_argument("--revert", type=int, metavar="ID", help="undo change ID from tuning/params.json")
+    p.set_defaults(fn=cmd_improve)
+
+    p = sub.add_parser("evaluate", help="walk-forward accuracy of the points model with the current code and settings")
+    p.add_argument("--save", metavar="NAME", help="keep this run's per-gameweek results under NAME")
+    p.add_argument("--against", metavar="NAME", help="compare with a run saved earlier")
+    p.add_argument("--no-refresh", action="store_true", help="use cached match data")
+    p.set_defaults(fn=cmd_evaluate)
 
     p = sub.add_parser("auto", help="unattended mode: plan near a deadline and, if allowed, act on the account")
     p.add_argument("--force", action="store_true", help="run now whatever the timing says")
