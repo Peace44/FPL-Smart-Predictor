@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 
 from fpl_smart import evaluate as ev
-from fpl_smart import gwreview, improve, tuning, xp
+from fpl_smart import evidence, gwreview, improve, tuning, xp
 from fpl_smart.scoring import score_gw
 
 # ids 1-2 keepers, 3-7 defenders, 8-12 midfielders, 13-15 forwards
@@ -291,3 +291,115 @@ def test_a_review_with_no_limiting_factor_is_done_when_scheduled(state, monkeypa
     assert "done_gw" not in improve._state()
     assert improve.run(str(review), if_due=True, **quiet) == 0      # scheduled: done, not retried every run
     assert improve._state()["done_gw"] == 10
+
+
+# ----------------------------------------------------------------------------- how sure the limiting factor is
+def test_part_noise_is_signed_like_the_deficits():
+    elite = [{"best_xi": b, "selection": s, "captain_extra": 2, "chip_extra": 0, "hits": 0}
+             for b, s in ((40, 5), (50, 3), (60, 1))]
+    C = gwreview.part_noise(elite)
+    assert C["squad"]["squad"] == pytest.approx(100) and C["selection"]["selection"] == pytest.approx(4)
+    assert C["squad"]["selection"] == pytest.approx(20)     # more best eleven = less squad deficit, here less bench
+    assert C["captaincy"]["captaincy"] == 0
+    assert gwreview.part_noise(elite[:2]) is None
+
+
+def _weeks(squad, selection, var=4.0):
+    cov = {f: {g: (var if f == g else 0.0) for g in gwreview.FACTORS} for f in gwreview.FACTORS}
+    return [{"gw": i + 1, "deficit_cov": cov,
+             "deficits": {"squad": a, "selection": b, "captaincy": 0, "chips": 0, "hits": 0}}
+            for i, (a, b) in enumerate(zip(squad, selection))]
+
+
+def test_one_week_never_settles_the_factor():
+    win = _weeks([10], [0])
+    f, _ = gwreview.choose_factor(win)
+    c = gwreview.certainty(win, f)
+    assert f == "squad" and not c["settled"] and c["needed"] is None
+    assert c["se"]["squad"] == pytest.approx(2) and c["lead"] == pytest.approx(10)
+    assert c["lead_se"] == pytest.approx(np.sqrt(8))
+    assert "from one gameweek" in gwreview.certainty_text(f, c)
+    assert "lead" not in gwreview.certainty([{**win[0], "deficit_cov": None}], f)   # no noise estimate at all
+
+
+def test_a_steady_lead_settles_and_a_noisy_one_does_not():
+    steady = _weeks([10, 11, 9, 10, 12, 8], [1, 0, 2, 1, 0, 1])
+    c = gwreview.certainty(steady, "squad")
+    assert c["settled"] and c["needed"] == pytest.approx(2.571, abs=1e-3) and c["runner_up"] == "selection"
+    assert gwreview.certainty_text("squad", c).startswith("**Settled:**")
+    noisy = _weeks([25, -5, 20, -10, 15, -5], [0] * 6)
+    c = gwreview.certainty(noisy, gwreview.choose_factor(noisy)[0])
+    assert not c["settled"] and c["se"]["squad"] > 5            # the spread of your own weeks, not the top 50's
+    assert gwreview.certainty(noisy, "operations")["settled"]
+
+
+# ----------------------------------------------------------------------------- the model's errors, pooled
+def test_collect_sums_errors_by_club():
+    likely = pd.DataFrame({"team": ["A", "A", "B"], "pos": [1, 2, 2], "xp": [3.0, 4.0, 5.0], "pts": [5, 4, 2],
+                           "cs": [1.0, 1.0, 0.5], "a_cs": [4.0, 4.0, 0.0]}, index=[1, 2, 3])
+    allp = likely.assign(p_play=[0.9, 0.9, 0.3], played=[1.0, 1.0, 0.0])
+    teams = pd.DataFrame({"projected": [1.0, 2.0], "xg": [1.5, 1.0]}, index=["A", "B"])
+    e = evidence.collect(likely, allp, likely.nlargest(2, "xp"), teams, ["cs"], [0, 0.5, 1.0001],
+                         {1: "GKP", 2: "DEF"})
+    assert e["comp:cs"] == {"A": [2, 6.0], "B": [1, -0.5]}
+    assert e["pos:GKP"] == {"A": [1, 2.0]} and e["pos:DEF"] == {"A": [1, 0.0], "B": [1, -3.0]}
+    assert e["top10"] == {"A": [1, 0.0], "B": [1, -3.0]}
+    assert e["team_xg"] == {"A": [1, 0.5], "B": [1, -1.0]}
+    assert e["play:0%-50%"]["B"] == [1, pytest.approx(-0.3)] and e["play:50%-100%"]["A"] == [2, pytest.approx(0.2)]
+
+
+def _review(gw, errors):
+    return {"gw": gw, "model": {"errors": errors}}
+
+
+def test_pool_clusters_by_club_and_gameweek():
+    reviews = [_review(1, {"comp:cs": {"A": [2, 1.0], "B": [2, 0.6], "C": [2, 0.8]}}),
+               _review(2, {"comp:cs": {"A": [2, 0.4], "B": [2, 0.2], "C": [2, 0.6]}}),
+               {"gw": 3, "model": None}, _review(4, {"unknown": {"A": [5, 1.0], "B": [5, 1.0]}})]
+    [f] = evidence.pool(reviews)
+    assert f.key == "comp:cs" and f.mean == pytest.approx(0.3) and f.n == 12 and f.gws == [1, 2]
+    assert f.se == pytest.approx(np.sqrt(6 / 5 * 0.40) / 12)       # CR1 over the six club-weeks
+    assert f.z > 5 and f.verdict == "watch"                         # two gameweeks: a shared shock is not ruled out
+    assert "too low by 0.30" in f.size_text()
+    reviews.append(_review(5, {"comp:cs": {"A": [2, 0.7], "B": [2, 0.5], "C": [2, 0.6]}}))
+    assert evidence.pool(reviews)[0].verdict == "act"
+
+
+def test_pool_uses_the_spread_between_gameweeks_when_larger():
+    reviews = [_review(g, {"pos:MID": {"A": [1, m], "B": [1, m]}}) for g, m in ((1, 0.0), (2, 0.3), (3, 0.6))]
+    [f] = evidence.pool(reviews)
+    assert f.se == pytest.approx(0.3 / np.sqrt(3))
+    assert f.verdict is None                                      # 1.7 s.e.: within noise
+
+
+def test_leads_rank_act_before_watch_and_drop_small_or_noisy():
+    def finding(key, mean, se):
+        return evidence.Finding(key, evidence.check(key), mean, se, 500, [10, 11, 12])
+    fs = [finding("comp:bonus", 0.10, 0.04), finding("pos:GKP", -0.6, 0.1), finding("comp:cs", 0.02, 0.001),
+          finding("comp:goals", 0.2, 0.2)]
+    ranked = sorted(fs, key=lambda f: (f.verdict != "act", f.verdict != "watch", -abs(f.z)))
+    assert [f.key for f in evidence.leads(ranked)] == ["pos:GKP", "comp:bonus"]
+    assert [r[4] for r in evidence.table(ranked)] == ["act", "watch"]
+    assert "too high by 0.60" in fs[1].size_text()
+    assert "2 to act on" not in evidence.summary(ranked) and "1 to act on" in evidence.summary(ranked)
+
+
+# ----------------------------------------------------------------------------- the brief is aimed by evidence
+def test_brief_leads_with_evidence_and_says_when_nothing_is_well_aimed(tuned, tmp_path):
+    review = tmp_path / "gw12_review.md"
+    review.write_text(gwreview.NOTES_HEADING + "\n")
+    outcomes = [improve.Outcome("points_model", [_trial(1.2)])]
+    gk = evidence.Finding("pos:GKP", evidence.check("pos:GKP"), 0.6, 0.1, 80, [10, 11, 12])
+    unsettled = {"n": 2, "se": {}, "settled": False}
+
+    text = improve.render(12, review, {"final": True}, "selection", {"selection": 9.8}, [{"gw": 11}, {"gw": 12}],
+                          outcomes, None, None, True, cert=unsettled, found=[gk])
+    assert "Strongest evidence: GKP points per likely starter, projection too low by 0.60" in text
+    assert text.index("### Evidence") < text.index("### Ideas for the limiting factor")
+    assert "**selection** (not settled)" in text
+
+    text = improve.render(12, review, {"final": True}, "selection", {}, [], outcomes, None, None, True,
+                          cert=unsettled, found=[])
+    assert "No code change is well aimed yet" in text
+    lines = improve.result_lines("selection", outcomes, None, "x.md", cert={"settled": True}, found=[])
+    assert any("is settled, so its ideas aim the change" in x for x in lines) and "/fpl-improve" in " ".join(lines)

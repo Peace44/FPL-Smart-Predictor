@@ -16,6 +16,9 @@ place needs. The difference splits exactly into five parts:
     hits        points spent on transfers
 
 The part with the largest average gap over recent engine-managed gameweeks is the limiting factor.
+Each part's average carries a standard error, and the factor counts as settled only when it leads the
+runner-up by more than chance (`certainty`). Until then code changes are aimed by the model's errors
+pooled over every review (`evidence.py`), which each review stores.
 """
 from __future__ import annotations
 
@@ -29,8 +32,9 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from scipy import stats
 
-from . import fpl_api
+from . import evidence, fpl_api
 from .config import POS, REPORTS, team_id
 from .scoring import MIN_FORMATION, score_gw
 
@@ -270,6 +274,73 @@ def choose_factor(win: list[dict], operations_lost: float = 0.0) -> tuple[str | 
     return max(avg, key=avg.get), avg
 
 
+# how each team's own numbers enter its deficits (squad = elite best eleven - ours, selection = ours - elite, ...)
+DEFICIT_SIGN = {"squad": ("best_xi", -1), "selection": ("selection", 1), "captaincy": ("captain_extra", -1),
+                "chips": ("chip_extra", -1), "hits": ("hits", 1)}
+
+
+def part_noise(elite: list[dict]) -> dict | None:
+    """How much one manager's week varies, part by part: the covariance of the parts across the top managers
+    this week, signed like the deficits. They share a template, so for a team further from it this is a
+    lower bound."""
+    if len(elite) < 3:
+        return None
+    X = np.array([[s * e[k] for k, s in (DEFICIT_SIGN[f] for f in FACTORS)] for e in elite], float)
+    C = np.cov(X, rowvar=False)
+    return {f: {g: float(C[i, j]) for j, g in enumerate(FACTORS)} for i, f in enumerate(FACTORS)}
+
+
+def certainty(win: list[dict], factor: str | None) -> dict:
+    """How sure the window is of its limiting factor: each part's standard error, and whether the factor leads
+    the runner-up by more than chance.
+
+    The noise is estimated two ways and the larger is used: the top managers' spread in each week of the
+    window (`deficit_cov`, a lower bound for your team), and, from two weeks on, the spread of your own
+    weeks. The lead must clear Student's t at 95% (two-sided) with n - 1 degrees of freedom, so a single
+    week never settles it: your own week-to-week spread is not known yet."""
+    n = len(win)
+    out = {"n": n, "se": {}, "settled": False}
+    if factor == "operations":
+        return out | {"settled": True}           # points the autopilot lost are counted, not estimated
+    if factor is None or not n:
+        return out
+    D = np.array([[float(r["deficits"][f]) for f in FACTORS] for r in win])
+    avg = D.mean(axis=0)
+    est = []
+    covs = [np.array([[r["deficit_cov"][f][g] for g in FACTORS] for f in FACTORS]) for r in win if r.get("deficit_cov")]
+    if covs:
+        est.append(np.mean(covs, axis=0) / n)
+    if n >= 2:
+        est.append(np.cov(D, rowvar=False, ddof=1) / n)
+    if not est:
+        return out
+    out["se"] = {f: float(np.sqrt(max(M[i, i] for M in est))) for i, f in enumerate(FACTORS)}
+    a = FACTORS.index(factor)
+    b = max((i for i in range(len(FACTORS)) if i != a), key=lambda i: avg[i])
+    lead = float(avg[a] - avg[b])
+    se = float(np.sqrt(max(max(M[a, a] + M[b, b] - 2 * M[a, b], 0.0) for M in est)))
+    t = lead / se if se > 0 else 0.0
+    need = float(stats.t.ppf(0.975, n - 1)) if n >= 2 else None
+    out |= {"runner_up": FACTORS[b], "lead": lead, "lead_se": se, "t": float(t), "needed": need,
+            "settled": bool(need is not None and t >= need)}
+    return out
+
+
+def certainty_text(f: str, cert: dict) -> str:
+    """One sentence: is the limiting factor settled, and by how much."""
+    if f == "operations":
+        return "**Settled:** points lost to the autopilot itself come first."
+    if "lead" not in cert:
+        return "**Not settled:** there is no estimate of the noise yet."
+    lead = f"{f} leads {cert['runner_up']} by {cert['lead']:.1f} ± {cert['lead_se']:.1f} points a week"
+    if cert["needed"] is None:
+        return (f"**Not settled:** {lead}, from one gameweek. The ± is the top managers' spread this week, a lower "
+                "bound for your team; your own week-to-week spread needs two gameweeks or more.")
+    word = "Settled" if cert["settled"] else "Not settled"
+    return (f"**{word}:** {lead} ({cert['t']:.1f} standard errors; with {cert['n']} gameweeks it takes "
+            f"{cert['needed']:.1f}).")
+
+
 def _rank_band(rank: int | None) -> int | None:
     if not rank:
         return None
@@ -419,8 +490,11 @@ def build(gw: int | None = None, entry_id: int | None = None, log=lambda m: None
         elite_info["ids_next"] = ids_next
 
     th = thresholds() if now_is_gw else {}
-    win = window(reviews + ([{"gw": gw, "engine_managed": engine, "deficits": dfc}] if dfc else []), gw)
+    dcov = part_noise(elite)
+    win = window(reviews + ([{"gw": gw, "engine_managed": engine, "deficits": dfc, "deficit_cov": dcov}]
+                            if dfc else []), gw)
     factor, avg = choose_factor(win, ops_lost)
+    cert = certainty(win, factor)
 
     data = {
         "version": VERSION, "gw": gw, "final": final, "generated": pd.Timestamp.now(tz="UTC").strftime("%d %b %Y %H:%M UTC"),
@@ -441,10 +515,10 @@ def build(gw: int | None = None, entry_id: int | None = None, log=lambda m: None
                    "recommended_net": rec_score},
         "projection": {k: v for k, v in (proj or {}).items() if k not in ("table",)} if proj else None,
         "model": model,
-        "elite": elite_info, "deficits": dfc,
+        "elite": elite_info, "deficits": dfc, "deficit_cov": dcov,
         "operations": {"incidents": incidents, "points_lost": ops_lost},
         "thresholds": th,
-        "limiting_factor": factor, "window": {"gws": [r["gw"] for r in win], "avg": avg},
+        "limiting_factor": factor, "window": {"gws": [r["gw"] for r in win], "avg": avg, "certainty": cert},
     }
     rv = Review(gw, final, data)
     ctx = dict(ours=ours, old=old, plan=plan, proj=proj, model=model, elite=elite, name=name, short=short, Pp=Pp,
@@ -579,6 +653,8 @@ def _model_check(Pp: pd.DataFrame, L: pd.DataFrame, snap: pd.DataFrame, bs: dict
                     for _, r in miss.nlargest(5, "err").iterrows()]
     out["over"] = [{"name": r["name"], "team": r["team"], "xp": float(r["xp"]), "pts": int(r["pts"])}
                    for _, r in miss.nsmallest(5, "err").iterrows()]
+    # the same checks by club, so `evidence.pool` can add them up over the season with standard errors
+    out["errors"] = evidence.collect(likely, d, top, T if len(T) else None, COMPONENTS, bins, POS)
     return out
 
 
@@ -836,19 +912,31 @@ def _render_sections(rv: Review, c: dict) -> list[str]:
     # ---- what can be improved
     sec = ["## What can be improved", ""]
     dfc, win = D["deficits"], D["window"]
+    cert = win.get("certainty") or {}
+    se = cert.get("se") or {}
     if dfc:
         n = len(win["gws"])
-        rows = [[f, f"{dfc[f]:+.1f}", f"{win['avg'][f]:+.1f}" if win["avg"] else "-", LEVERS[f]] for f in FACTORS]
+        rows = [[f, f"{dfc[f]:+.1f}",
+                 (f"{win['avg'][f]:+.1f}" + (f" ± {se[f]:.1f}" if f in se else "")) if win["avg"] else "-", LEVERS[f]]
+                for f in FACTORS]
         sec += [f"Points behind the top {D['elite']['n']} by part (positive = behind), this week and averaged over the "
                 f"last {n} engine-managed gameweek{'s' if n != 1 else ''} ({', '.join(f'GW{g}' for g in win['gws']) or 'none'}):", "",
-                _table(["Part", f"GW{gw}", "Average", "What moves it"], rows), ""]
-        if n < 3:
-            sec.append(f"_With {n} gameweek{'s' if n != 1 else ''} the average is mostly luck; it settles after four or five._")
-            sec.append("")
+                _table(["Part", f"GW{gw}", "Average ± s.e.", "What moves it"], rows), ""]
     f = D["limiting_factor"]
     if f:
-        sec.append(f"**Limiting factor: {f}** — {FACTOR_TEXT[f]}. Lever: {LEVERS[f]}.")
+        settled = cert.get("settled", False)
+        sec.append(f"**Limiting factor: {f}**{'' if settled else ' (not settled)'} — {FACTOR_TEXT[f]}. Lever: {LEVERS[f]}.")
         sec.append("")
+        sec.append(certainty_text(f, cert))
+        if not settled:
+            sec.append("Until it is, code changes are aimed by the model's errors pooled over every review (below), "
+                       "not by the factor.")
+        sec.append("")
+    found = evidence.pool(c["reviews"] + [D])
+    sec += ["Where the projections were wrong, pooled over the season's reviews:", "", evidence.summary(found)]
+    if evidence.leads(found):
+        sec += ["", _table(evidence.HEADERS, evidence.table(found, 5))]
+    sec.append("")
     obs = _observations(D, c)
     if obs:
         sec += ["Observations:", ""] + [f"- {o}" for o in obs] + [""]
@@ -1012,6 +1100,8 @@ def summary_lines(rv: Review) -> list[str]:
     if D.get("elite"):
         lines.append(f"Top {D['elite']['n']} average: {D['elite']['avg']['net']:.1f}.")
     if D.get("limiting_factor"):
-        lines.append(f"Limiting factor: {D['limiting_factor']} ({FACTOR_TEXT[D['limiting_factor']]}).")
+        settled = ((D.get("window") or {}).get("certainty") or {}).get("settled", False)
+        lines.append(f"Limiting factor: {D['limiting_factor']} ({FACTOR_TEXT[D['limiting_factor']]})"
+                     + ("." if settled else "; not settled yet."))
     lines.append(f"Full review: reports/{review_path(rv.gw).name}")
     return lines

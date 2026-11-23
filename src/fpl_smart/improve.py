@@ -17,7 +17,10 @@ errors without making the guard metric or the current season clearly worse. Over
 is coordinate descent on whatever the reviews keep finding limiting.
 
 When no setting passes, or none covers the factor, the limit is likely in the code: the run writes a
-brief for a code change (`reports/gwNN_improvement.md`) that the `fpl-improve` skill works from. The Discord
+brief for a code change (`reports/gwNN_improvement.md`) that the `fpl-improve` skill works from. The
+brief is aimed by evidence first: the model's errors pooled over every review, with standard errors
+(`evidence.py`). The factor's own ideas follow, marked settled or not (`gwreview.certainty`): a few
+weeks of team results rarely tell the parts apart, so an unsettled factor does not aim a change. The Discord
 report says which of the reasons it was (no setting covers the factor, none passed, a test could
 not run) and names the skill. A scheduled run that fails is reported too, once per gameweek and
 kind of error, and a gameweek that no run worked on is named in the next run's report.
@@ -34,7 +37,7 @@ import numpy as np
 import pandas as pd
 
 from . import evaluate as ev
-from . import fpl_api, gwreview, notify, tuning
+from . import evidence, fpl_api, gwreview, notify, tuning
 from .autopilot import Settings, _report
 from .config import REPORTS
 
@@ -309,14 +312,27 @@ def unchanged(f: str, outcomes: list[Outcome]) -> str:
     return f"No setting passed the test{_closest(outcomes)}: the limit is in the code."
 
 
+def aim(f: str, cert: dict | None, found: list[evidence.Finding]) -> str:
+    """What aims a code change this week: the strongest model error, else a settled factor, else nothing yet."""
+    acts = [x for x in found if x.verdict == "act"]
+    if acts:
+        a = acts[0]
+        return f"Strongest evidence: {a.check.label}, {a.size_text()} (z {a.z:+.1f}); it moves {a.check.factor}."
+    if cert and cert.get("settled"):
+        return f"No model error is strong enough yet; the limiting factor ({f}) is settled, so its ideas aim the change."
+    return (f"No code change is well aimed yet: the limiting factor ({f}) is not settled and no model error is "
+            "strong enough. The next reviews add evidence.")
+
+
 def result_lines(f: str, outcomes: list[Outcome], adopted: Trial | None, brief: str,
-                 skipped: list[tuple[int, str]] = ()) -> list[str]:
+                 skipped: list[tuple[int, str]] = (), cert: dict | None = None,
+                 found: list[evidence.Finding] = ()) -> list[str]:
     """The Discord report of a run: what changed, or why nothing did and what you can do about it."""
     if adopted:
         L = [f"Changed {adopted.knob} {adopted.old:g} → {adopted.new:g} ({adopted.primary.metric} better by "
              f"{adopted.primary.z:.1f} s.e.). Nothing for you to do."]
     else:
-        L = [unchanged(f, outcomes),
+        L = [unchanged(f, outcomes)] + ([aim(f, cert, list(found))] if cert is not None else []) + [
              f"A brief for a code change is in {brief}. To act on it, run /fpl-improve in Claude Code "
              "(optional: the autopilot carries on with the current settings either way)."]
     L += [f"GW{g} was never worked on: {why}." for g, why in skipped]
@@ -382,7 +398,10 @@ def _run(path: Path, dry_run: bool, factor: str | None, heavy: bool, budget_min:
             return 0
         log(why)
         return 2
-    log(f"GW{gw}: limiting factor {f}" + (f" (average {avg[f]:+.1f} behind the top 50 over {len(win)} GW)" if f in avg else ""))
+    cert = gwreview.certainty(win, f)
+    found = evidence.pool(sorted(reviews, key=lambda r: r["gw"]))
+    log(f"GW{gw}: limiting factor {f}" + (f" (average {avg[f]:+.1f} behind the top 50 over {len(win)} GW)" if f in avg else "")
+        + ("" if cert["settled"] else ", not settled"))
 
     order = list(PLAN.get(f, []))
     if f == "selection" and (data.get("projection") or {}).get("minutes_loss", 0) > 2:
@@ -418,17 +437,18 @@ def _run(path: Path, dry_run: bool, factor: str | None, heavy: bool, budget_min:
         change = tuning.set_value(adopted.knob, adopted.new,
                                   f"GW{gw} review, limiting factor {f}: {adopted.primary.metric} better by "
                                   f"{adopted.primary.z:.1f} s.e.")
-    report = render(gw, path, data, f, avg, win, outcomes, adopted, change, dry_run)
+    report = render(gw, path, data, f, avg, win, outcomes, adopted, change, dry_run, cert=cert, found=found)
     out = REPORTS / f"gw{gw:02d}_improvement.md"
     if not dry_run:
         skipped = missed(gw)
         for g, why in skipped:
             log(f"improve: GW{g} was never worked on: {why}")
         out.write_text(report)
-        tuning.append_ledger(_ledger(gw, f, avg, outcomes, adopted, change, skipped))
+        tuning.append_ledger(_ledger(gw, f, avg, outcomes, adopted, change, skipped, cert=cert, found=found))
         _mark_done(gw)
         notify.publish({out.name: report})
-        _report(log, f"GW{gw} self-improvement: {f}", result_lines(f, outcomes, adopted, f"reports/{out.name}", skipped),
+        _report(log, f"GW{gw} self-improvement: {f}",
+                result_lines(f, outcomes, adopted, f"reports/{out.name}", skipped, cert=cert, found=found),
                 kind="ok" if adopted else "info")
         log(f"written {out}")
     else:
@@ -448,10 +468,12 @@ def _trial_rows(o: Outcome) -> list[list]:
     return rows
 
 
-def render(gw, path, data, f, avg, win, outcomes, adopted, change, dry_run) -> str:
+def render(gw, path, data, f, avg, win, outcomes, adopted, change, dry_run, cert: dict | None = None,
+           found: list[evidence.Finding] = ()) -> str:
+    cert = cert or {}
     L = [f"# Gameweek {gw}: self-improvement run" + (" (dry run)" if dry_run else ""), "",
          f"- Review: `{path.name}` ({'final' if data.get('final') else 'provisional'})",
-         f"- Limiting factor: **{f}** ({gwreview.FACTOR_TEXT.get(f, f)})"
+         f"- Limiting factor: **{f}**{'' if cert.get('settled') else ' (not settled)'} ({gwreview.FACTOR_TEXT.get(f, f)})"
          + (f", {avg[f]:+.1f} points a week behind the top 50 over "
             f"{', '.join('GW' + str(r['gw']) for r in win)}" if f in avg else ""),
          f"- Rule: a setting changes only if it beats the current value by {Z_ADOPT:g} standard errors and by at "
@@ -489,10 +511,20 @@ def render(gw, path, data, f, avg, win, outcomes, adopted, change, dry_run) -> s
             L.append("The next plan uses it. The next reviews show whether the factor it targets improves.")
     else:
         L.append(unchanged(f, outcomes))
+        found = list(found)
         L += ["", "## Needs a code change", "",
-              f"Ideas for moving **{f}**, most promising first, for the `fpl-improve` skill (run /fpl-improve in "
-              "Claude Code) or you to implement on a branch, test with `fpl evaluate` and the test suite, and record "
-              "in `tuning/ledger.md`:", ""]
+              "For the `fpl-improve` skill (run /fpl-improve in Claude Code) or you to implement on a branch, test with "
+              "`fpl evaluate` and the test suite, and record in `tuning/ledger.md`.", "",
+              f"**{aim(f, cert, found)}**", "",
+              "How to choose: start from the first row marked *act* below. If there is none, use the factor's ideas "
+              "only when the factor is settled. If neither, no change is well aimed this week; rows marked *watch* "
+              "say where to look once more reviews are in.", "",
+              "### Evidence: where the projections were wrong", "", evidence.summary(found)]
+        if evidence.leads(found):
+            L += ["", gwreview._table(evidence.HEADERS, evidence.table(found))]
+        L += ["", f"### Ideas for the limiting factor, {f}", ""]
+        if cert:
+            L += [gwreview.certainty_text(f, cert), ""]
         L += [f"{i}. {x}" for i, x in enumerate(STRUCTURAL.get(f, []), 1)]
         notes = gwreview.existing_notes(path.read_text()).strip()
         if notes:
@@ -503,9 +535,13 @@ def render(gw, path, data, f, avg, win, outcomes, adopted, change, dry_run) -> s
     return "\n".join(L) + "\n"
 
 
-def _ledger(gw, f, avg, outcomes, adopted, change, skipped=()) -> list[str]:
+def _ledger(gw, f, avg, outcomes, adopted, change, skipped=(), cert: dict | None = None,
+            found: list[evidence.Finding] = ()) -> list[str]:
     when = pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%d")
-    L = [f"## GW{gw} ({when}): limiting factor {f}" + (f", {avg[f]:+.1f} a week behind the top 50" if f in avg else "")]
+    L = [f"## GW{gw} ({when}): limiting factor {f}" + (f", {avg[f]:+.1f} a week behind the top 50" if f in avg else "")
+         + ("" if cert is None else ", settled" if cert.get("settled") else ", not settled")]
+    if cert is not None and not adopted:
+        L.append(f"- Aim: {aim(f, cert, list(found))}")
     for o in outcomes:
         if o.skipped:
             L.append(f"- {o.experiment}: skipped, {o.skipped}")

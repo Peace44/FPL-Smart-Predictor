@@ -14,8 +14,9 @@ before keeping it. Work from evidence, one change at a time.
 - Use the review the user names. Otherwise use the newest `reports/gw*_review.md` whose embedded data
   (the `<!-- fpl-review-data ... -->` block at the end) has `"final": true`. If only a provisional one
   exists, say so. Work from it only if the user wants that.
-- Read all of it: the limiting factor and the "What can be improved" table, the observations, the
-  model check, and the **"Your notes"** section. The user's notes outrank the automatic diagnosis
+- Read all of it: the limiting factor, the "What can be improved" table (each part's average ± its
+  standard error, and whether the factor is settled), the model errors pooled over the season, the
+  observations, the model check, and the **"Your notes"** section. The user's notes outrank the automatic diagnosis
   when they disagree. Say which one you followed.
 - Read `tuning/ledger.md` so you do not repeat a change that was already tried and rejected.
 
@@ -32,10 +33,17 @@ before keeping it. Work from evidence, one change at a time.
 
 ## 3. A code change for the limiting factor
 
-1. **Choose.** Pick the brief's idea most likely to move the limiting factor that has not been tried
-   (ledger lines starting `- Code change:`). You may pick something else if the review's evidence
-   points to it, e.g. a bug visible in the review: a player projected for a team he left, or
-   minutes that ignore a flag. Say why you chose it.
+1. **Choose.** The brief's bold line says what aims the change this week. Skip anything already
+   tried (ledger lines starting `- Code change:`).
+   - **A row marked *act*** in its evidence table (a model error pooled over three or more
+     gameweeks, at least 3 standard errors, big enough to matter): take the first one. Its "Where in
+     the code" column says where to look. First check that the replays show the same error on the
+     current code (`fpl evaluate`); a live error the replays do not show is probably a run of luck.
+   - **No *act* row, but the factor is settled:** take the factor's idea most likely to move it.
+   - **Neither:** say that no change is well aimed this week, name the strongest *watch* rows, and
+     stop unless the user wants to go ahead. If they do, say the change is a guess.
+   A bug visible in the review (a player projected for a team he left, minutes that ignore a flag)
+   comes before all of these: one instance is enough evidence. Say which case applied and why.
 2. **Baseline.** On the current code: `.venv/bin/fpl evaluate --save before-gwNN`
    (walk-forward points-model metrics by gameweek, about 30 seconds).
 3. **Branch.** `git checkout -b improve/gwNN-<short-slug>`. Never work on `main`: the autopilot runs
@@ -80,5 +88,5 @@ factor must keep the parts adding up to the gap with the top 50, or be reported 
 - Never weaken the checks in `execute.py`, the hit cap, or the adoption thresholds in `improve.py`
   to make a change pass.
 - One week of points is mostly luck. A single review chooses where to look; the walk-forward tests
-  decide what to keep.
+  decide what to keep. An unsettled limiting factor is not a reason to change code.
 - Report outcomes plainly: what was tried, the numbers, and what was kept.

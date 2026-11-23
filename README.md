@@ -145,8 +145,14 @@ before FPL has checked the data is marked provisional and is rewritten later. It
 - **What can be improved:** the gap to the top 50 split into five parts that add up exactly: squad
   (best possible eleven), selection (left on the bench), captaincy, chips and hits. The part with the
   largest average gap over the last six engine-managed gameweeks is the **limiting factor**. An
-  autopilot mishap that cost points comes first. Below that are plain observations, each tied to
-  what could change it.
+  autopilot mishap that cost points comes first. Each average carries its standard error, and the
+  factor is marked **settled** only when it leads the next part by more than chance (Student's t,
+  95%). One gameweek never settles it: one manager's parts swing by 5 to 10 points from week to
+  week. Below that come the **model's errors pooled over the season**: about 20 checks of the
+  projection (each points component, each position, the ten highest projections, team expected
+  goals, P(plays)), with standard errors clustered by club and gameweek. A check is marked *act*
+  at 3 standard errors or more over at least three gameweeks, and *watch* at 2 or more, or with
+  fewer gameweeks. Plain observations follow, each tied to what could change it.
 - **Your notes:** anything you write under that heading is kept when the review is rewritten, and
   the self-improvement skill reads it.
 
@@ -168,7 +174,10 @@ records every run. `fpl improve --revert ID` undoes a change. The experiments be
 | chips, operations | (no setting covers them) | |
 
 When no setting passes, or no setting covers the factor, the run writes a brief for a code change in
-`reports/gwNN_improvement.md`. The Claude Code skill **`/fpl-improve`**
+`reports/gwNN_improvement.md`. The brief is aimed by evidence: the first pooled model error marked
+*act*; else, if the factor is settled, the factor's ideas; else it says plainly that no change is well
+aimed that week. (The settings are at a local optimum: in GW11 none of the 30 one-step changes passed,
+so most weeks end with this brief.) The Claude Code skill **`/fpl-improve`**
 (`.claude/skills/fpl-improve/SKILL.md`) works from that brief: it implements the most promising
 untried idea on a branch, proves it with `fpl evaluate --against` and the tests, records the result in
 the ledger, and asks before merging. When a review missed something, the skill also extends what the
