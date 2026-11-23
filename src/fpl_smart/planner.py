@@ -152,9 +152,8 @@ def save(rec: Recommendation, text: str) -> dict:
         "names": {str(p): name.get(p) for p in set(w.lineup + w.bench + w.transfers_out)},
         "squad_before": rec.state.squad,
     }
-    js = d / f"plan-{stamp}.json"
+    js = d / "latest.json"
     js.write_text(json.dumps(record, indent=1))
-    (d / "latest.json").write_text(json.dumps(record, indent=1))
     snap = d / f"projection-{stamp}.parquet"
     try:
         snapshot(rec.projection).to_parquet(snap)
