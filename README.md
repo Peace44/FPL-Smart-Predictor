@@ -175,7 +175,8 @@ the ledger, and asks before merging. When a review missed something, the skill a
 review measures.
 
 `scripts/auto.sh` runs `fpl improve --if-due` after each check. It works on a new final review
-only, and only while the next deadline is more than 50 hours away. `FPL_SELF_IMPROVE=off` in the
+only, and only while the next deadline is more than 50 hours away (the autopilot's 48-hour
+planning window plus two hours, so a run ends before planning starts). `FPL_SELF_IMPROVE=off` in the
 environment of the scheduled task switches it off.
 
 ## Letting it act for you

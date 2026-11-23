@@ -184,3 +184,18 @@ def test_every_factor_has_a_plan_and_ideas():
         assert all(k in tuning.KNOBS for k in e.knobs)
         assert e.primary in ev.METRICS and (e.guard is None or e.guard in ev.METRICS)
     assert json.dumps(gwreview.LEVERS) and set(gwreview.LEVERS) == set(improve.PLAN)
+
+
+@pytest.mark.parametrize("plan_within_h,hours_left,runs", [
+    (48.0, 51.0, True), (48.0, 49.0, False), (24.0, 27.0, True), (24.0, 25.0, False)])
+def test_improve_waits_for_the_planning_window(tmp_path, monkeypatch, plan_within_h, hours_left, runs):
+    review = tmp_path / "gw11_review.md"
+    review.write_text("")
+    deadline = pd.Timestamp.now(tz="UTC") + pd.Timedelta(hours=hours_left)
+    monkeypatch.setattr(improve, "latest_final_review", lambda: review)
+    monkeypatch.setattr(improve, "_state", lambda: {})
+    monkeypatch.setattr(gwreview, "parse", lambda text: {"gw": 11, "final": True})
+    monkeypatch.setattr(improve.fpl_api, "bootstrap", lambda max_age_h: {"events": [
+        {"id": 12, "is_next": True, "deadline_time": deadline.isoformat()}]})
+    monkeypatch.setattr(improve.Settings, "from_env", classmethod(lambda cls: cls(plan_within_h=plan_within_h)))
+    assert (improve.due(log=lambda *_: None) == review) is runs

@@ -31,6 +31,7 @@ import pandas as pd
 
 from . import evaluate as ev
 from . import fpl_api, gwreview, notify, tuning
+from .autopilot import Settings
 from .config import REPORTS
 
 Z_ADOPT = 3.0          # many candidates are tried each run; 3 s.e. keeps false adoptions rare
@@ -43,6 +44,9 @@ MIN_EFFECT = {"mse_rel": 0.008, "top30": 0.03, "top10": 0.05, "logloss": 0.002, 
 MIN_AVAIL_GWS = 3
 STATE = REPORTS / "improve-state.json"
 HEAVY_BUDGET_MIN = 45
+# A run must end before the autopilot starts planning, so the plan and its later checks see the same
+# settings and the lock never holds up a run near the deadline. The margin covers HEAVY_BUDGET_MIN.
+MARGIN_H = 2.0
 
 
 @dataclass
@@ -233,7 +237,8 @@ def _state() -> dict:
 
 
 def due(log=print) -> Path | None:
-    """For the scheduler: a final review not yet worked on, and no deadline in the next ~2 days."""
+    """For the scheduler: a final review not yet worked on, and the planning window for the next
+    deadline not yet open (more than plan_within_h + MARGIN_H hours away)."""
     f = latest_final_review()
     if f is None:
         return None
@@ -244,8 +249,10 @@ def due(log=print) -> Path | None:
     nxt = next((e for e in bs["events"] if e["is_next"]), None)
     if nxt is not None:
         left = (pd.Timestamp(nxt["deadline_time"]) - pd.Timestamp.now(tz="UTC")).total_seconds() / 3600
-        if left < 50:
-            log(f"improve: GW{d['gw']} review waits; the GW{nxt['id']} deadline is {left:.0f} hours away")
+        cutoff = Settings.from_env().plan_within_h + MARGIN_H
+        if left < cutoff:
+            log(f"improve: GW{d['gw']} review waits; the GW{nxt['id']} deadline is {left:.0f} hours away "
+                f"(runs only more than {cutoff:.0f} hours before it)")
             return None
     return f
 
